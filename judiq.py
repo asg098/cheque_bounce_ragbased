@@ -1162,16 +1162,20 @@ try:
     from slowapi.util import get_remote_address
     from slowapi.errors import RateLimitExceeded
     RATE_LIMITING_AVAILABLE = True
-except ImportError:
+except Exception:
     RATE_LIMITING_AVAILABLE = False
-    logger.warning("⚠️ slowapi not installed - rate limiting disabled. Install with: pip install slowapi")
-    class DummyLimiter:
-        def limit(self, rate):
-            def decorator(func):
-                return func
-            return decorator
-    Limiter = DummyLimiter
-    get_remote_address = lambda x: "0.0.0.0"
+
+# Always use DummyLimiter on Render — avoids slowapi/starlette version conflicts
+RATE_LIMITING_AVAILABLE = False
+
+class DummyLimiter:
+    def limit(self, rate):
+        def decorator(func):
+            return func
+        return decorator
+
+Limiter = DummyLimiter
+get_remote_address = lambda x: "0.0.0.0"
 
 # --- Logging configuration ---
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'WARNING')
@@ -10658,8 +10662,8 @@ async def generate_cross_examination(request: CrossExaminationRequest):
         raise HTTPException(status_code=500, detail=f"Cross-examination error: {str(e)}")
 
 @app.post("/analyze-case")
-@limiter.limit("30/minute")  # FIX #10: Rate limit - 30 requests per minute per IP
-async def analyze_case(request: CaseAnalysisRequest, http_request: Request):
+@limiter.limit("30/minute")
+async def analyze_case(request: CaseAnalysisRequest, http_request: Request = None):
 
     start = time.time()
     audit = AuditTrail()
