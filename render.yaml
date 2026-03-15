@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: judiq-api
+    runtime: python
+    region: singapore   # closest to India — change to: oregon / frankfurt / ohio
+    plan: free          # change to: starter ($7/mo) to avoid spin-down
+
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn judiq_render:app --host 0.0.0.0 --port $PORT
+
+    # ── Environment Variables ──────────────────────────────────
+    envVars:
+      # REQUIRED: Google Drive file ID for your cheque_bounce_kb.csv
+      # Steps:
+      #   1. Upload cheque_bounce_kb.csv to Google Drive
+      #   2. Share → "Anyone with the link" → Viewer
+      #   3. Copy the file ID from the URL:
+      #      https://drive.google.com/file/d/1btile_wGE2pjmU_gvm3ZwF-ufB246x5A/view
+      #   4. Paste it below (replace 1btile_wGE2pjmU_gvm3ZwF-ufB246x5A)
+      - key: GDRIVE_FILE_ID
+        value: 1btile_wGE2pjmU_gvm3ZwF-ufB246x5A
+
+      # OPTIONAL: Google Drive API key for faster / more reliable downloads
+      # Get one free at: https://console.cloud.google.com/ → APIs → Drive API → Credentials
+      - key: GDRIVE_API_KEY
+        value: ""   # leave empty if not using
+
+      # Auto-set by Render — do not change
+      - key: LOG_LEVEL
+        value: WARNING
