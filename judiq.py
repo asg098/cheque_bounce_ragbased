@@ -3029,7 +3029,7 @@ def load_llm_model():
     pass
 
 
-def generate_llm_response(prompt: str, max_tokens: int = 200) -> str:
+def generate_llm_response(prompt: str, max_tokens: int = 200, **kwargs) -> str:
     """LLM disabled on Render."""
     return ""
 
@@ -3205,8 +3205,8 @@ def load_kb():
     return False
 
 
-def search_kb(query: str, top_k: int = 5, category_filter: str = None) -> list:
-    """KB search disabled on Render."""
+def search_kb(query: str, top_k: int = 5, category_filter: str = None, **kwargs) -> list:
+    """KB search disabled on Render — returns empty list (no embedding model)."""
     return []
 
 
