@@ -3676,6 +3676,7 @@ def analyze_timeline(case_data: Dict) -> Dict:
                     f'cause of action arose ({cause_of_action.strftime("%Y-%m-%d")})'
                 )
                 timeline_analysis['limitation_risk'] = 'CRITICAL'
+                timeline_analysis['score'] = 0   # premature filing — fatal defect
                 timeline_analysis['timeline_chart'].append({
                     'date': complaint_filed_date.strftime('%Y-%m-%d'),
                     'event': f'Complaint Filed — PREMATURE (Day {days_to_complaint}/30)',
@@ -3692,6 +3693,7 @@ def analyze_timeline(case_data: Dict) -> Dict:
             elif complaint_filed_date <= limitation_deadline:
                 timeline_analysis['compliance_status']['limitation'] = f'✅ WITHIN LIMITATION ({days_to_complaint} days, deadline: {limitation_deadline.strftime("%Y-%m-%d")})'
                 timeline_analysis['limitation_risk'] = 'LOW'
+                timeline_analysis['score'] = 95   # all compliant
                 timeline_analysis['timeline_chart'].append({
                     'date': complaint_filed_date.strftime('%Y-%m-%d'),
                     'event': f'Complaint Filed (Day {days_to_complaint}/30)',
@@ -3950,27 +3952,57 @@ def analyze_ingredients(case_data: Dict, timeline_data: Dict) -> Dict:
     ing7_score = 100
     ing7_issues = []
 
-    if timeline_data['compliance_status'].get('limitation', '').startswith('❌'):
+    limitation_status_str = timeline_data.get('compliance_status', {}).get('limitation', '')
+
+    if 'PREMATURE' in limitation_status_str.upper():
+        # Premature filing — complaint filed BEFORE cause of action arose
+        # This is a separate defect from time-barred (which is filing TOO LATE)
         ing7_score = 0
-        ing7_issues.append('Complaint time-barred - CRITICAL DEFECT')
+        ing7_issues.append('Premature complaint — cause of action had not yet arisen under Section 138')
+        ingredients['fatal_defects'].append({
+            'ingredient': 7,
+            'defect': 'Complaint Filed Before Cause of Action Arose',
+            'severity': 'CRITICAL',
+            'explanation': (
+                'Complaint filed before the 15-day payment period expired. '
+                'Cause of action under Section 138 arises only after the accused '
+                'fails to pay within 15 days of receiving notice. '
+                'Filing before this is premature and not maintainable.'
+            )
+        })
+        _ing7_status = '❌ PREMATURE'
+
+    elif limitation_status_str.startswith('❌') and 'PREMATURE' not in limitation_status_str.upper():
+        # Time-barred — complaint filed TOO LATE (after 1-month limitation)
+        ing7_score = 0
+        ing7_issues.append('Complaint time-barred — filed beyond 1 month of cause of action')
         ingredients['fatal_defects'].append({
             'ingredient': 7,
             'defect': 'Complaint Barred by Limitation',
             'severity': 'CRITICAL',
-            'explanation': 'Complaint filed beyond one month of cause of action - requires condonation'
+            'explanation': (
+                'Complaint filed beyond the 1-month limitation period from cause of action. '
+                'Requires condonation application under Section 142 NI Act. '
+                'Condonation is discretionary and not guaranteed.'
+            )
         })
-    elif 'DELAYED' in timeline_data['compliance_status'].get('limitation', ''):
+        _ing7_status = '❌ TIME-BARRED'
 
+    elif 'DELAYED' in limitation_status_str:
         ing7_score = 50
-        ing7_issues.append('Slight delay - may be condoned with sufficient cause')
+        ing7_issues.append('Slight delay — may be condoned with sufficient cause')
+        _ing7_status = '⚠️ Delayed'
+
+    else:
+        _ing7_status = '✅ Compliant'
 
     ingredients['ingredient_details'].append({
         'number': 7,
         'name': 'Complaint Within One Month',
         'score': ing7_score,
-        'status': '✅ Compliant' if ing7_score == 100 else ('⚠️ Delayed' if ing7_score >= 50 else '❌ TIME-BARRED'),
+        'status': _ing7_status,
         'issues': ing7_issues,
-        'evidence_required': ['Complaint filing date proof', 'Calculation of limitation']
+        'evidence_required': ['Complaint filing date proof', 'Calculation of limitation period']
     })
     scores.append(ing7_score)
 
@@ -5625,8 +5657,11 @@ def calculate_overall_risk_score(
                 risk_model['hard_fatal_override'] = {
                     'applied': True,
                     'reason': hard_override_reason,
+                    'original_score': round(original_score, 1),
+                    'capped_at': hard_override_score,
+                    'capped_at_display': f"{hard_override_score}/100",
                     'final_score': hard_override_score,
-                    'message': 'FATAL DEFECT - Case at severe dismissal risk'
+                    'message': f'FATAL DEFECT — Score capped at {hard_override_score}/100'
                 }
 
                 risk_model['compliance_level'] = 'FATAL – HIGH DISMISSAL RISK'
@@ -5654,14 +5689,18 @@ def calculate_overall_risk_score(
         risk_model['overall_risk_score'] = min(risk_model['overall_risk_score'], 40)
 
     if fatal_defect_override:
+        _capped_at = risk_model['overall_risk_score']
         risk_model['fatal_defect_override'] = {
             'applied': True,
             'original_weighted_score': round(total_weighted, 1),
-            'overridden_score': risk_model['overall_risk_score'],
+            'original_score': round(total_weighted, 1),
+            'overridden_score': _capped_at,
+            'capped_at': _capped_at,
+            'capped_at_display': f"{_capped_at}/100",
             'reason': ' | '.join(override_reason),
-            'logic': 'Fatal defects auto-cap score - case will collapse regardless of other strengths',
-            'severity': 'FATAL' if risk_model['overall_risk_score'] <= 25 else 'CRITICAL',
-            'warning': '⚠️ Despite strong scores in other areas, fatal defects make case unviable'
+            'logic': 'Fatal defects auto-cap score — case will collapse regardless of other strengths',
+            'severity': 'FATAL' if _capped_at <= 25 else 'CRITICAL',
+            'warning': 'Despite strong scores in other areas, fatal defects make case unviable'
         }
 
         if risk_model['overall_risk_score'] <= 20:
@@ -7549,15 +7588,38 @@ def generate_executive_summary(
             })
 
     # ── Next actions ──
+    # next_actions as structured dicts so PDF template can read .action .urgency .details
     next_actions = []
     for d in unique_fatals[:3]:
-        next_actions.append(f"URGENT: {_s(d.get('remedy', d.get('defect', 'Address defect')))}")
+        next_actions.append({
+            'action':  _s(d.get('remedy', d.get('defect', 'Address fatal defect'))),
+            'urgency': 'URGENT',
+            'details': _s(d.get('impact', 'Fatal defect — will cause dismissal if not remedied'))
+        })
     if not case_data.get('postal_proof_available'):
-        next_actions.append("Obtain AD card or postal tracking confirmation for notice")
+        next_actions.append({
+            'action':  'Obtain AD card or speed post tracking confirmation for notice',
+            'urgency': 'HIGH',
+            'details': 'Without postal proof, notice service can be challenged by accused'
+        })
     if not case_data.get('written_agreement_exists'):
-        next_actions.append("Collect any WhatsApp/email evidence of the transaction")
+        next_actions.append({
+            'action':  'Collect WhatsApp/email/SMS evidence of the transaction or debt acknowledgment',
+            'urgency': 'MEDIUM',
+            'details': 'Absence of written agreement is the primary defence weakness'
+        })
+    if not case_data.get('ledger_available'):
+        next_actions.append({
+            'action':  'Obtain ledger entries or bank transfer records showing the transaction',
+            'urgency': 'MEDIUM',
+            'details': 'Without financial records, transaction trail is incomplete'
+        })
     if not next_actions:
-        next_actions.append("Proceed with final legal review before filing")
+        next_actions.append({
+            'action':  'Proceed with final legal review before filing',
+            'urgency': 'NORMAL',
+            'details': 'Case is in reasonable position — verify all documents before filing'
+        })
 
     # ── Edge case alert ──
     edge_cases_alert = edge_case_data.get('detected_cases', []) or []
@@ -8857,25 +8919,34 @@ def generate_executive_report(analysis_data: Dict) -> Dict:
     for doc_name, doc_info in doc_details.items():
         if isinstance(doc_info, dict) and doc_info.get('grade') in ['WEAK','VERY WEAK','MISSING','NOT AVAILABLE']:
             doc_gaps.append({
-                'document': doc_name,
-                'status': _safe(doc_info.get('grade'), 'Missing'),
-                'impact': _safe(doc_info.get('impact'), 'Reduces evidential strength'),
-                'remedy': _safe(doc_info.get('remedy'), 'Obtain and verify document')
+                'gap_name':  _safe(doc_name),   # ← PDF template reads gap_name
+                'document':  _safe(doc_name),
+                'severity':  'High',
+                'status':    _safe(doc_info.get('grade'), 'Missing'),
+                'impact':    _safe(doc_info.get('impact'), 'Reduces evidential strength'),
+                'remedy':    _safe(doc_info.get('remedy'), 'Obtain and verify document')
             })
     if not doc_gaps and doc_data.get('overall_strength_score', 100) < 70:
-        for field, label in [
-            ('written_agreement_exists', 'Written Loan/Transaction Agreement'),
-            ('ledger_available',         'Ledger / Account Records'),
-            ('original_cheque_available','Original Cheque'),
-            ('return_memo_available',    'Bank Dishonour Memo'),
-            ('postal_proof_available',   'Postal Proof of Notice'),
+        for field, label, sev, imp in [
+            ('written_agreement_exists', 'Written Loan/Transaction Agreement', 'Severe',
+             'Debt enforceability highly contestable — accused can deny legally enforceable debt'),
+            ('ledger_available',         'Ledger / Account Records', 'High',
+             'Transaction authenticity contestable — no paper trail of the transaction'),
+            ('original_cheque_available','Original Cheque', 'High',
+             'Primary instrument not secured — foundational evidence missing'),
+            ('return_memo_available',    'Bank Dishonour Memo', 'Severe',
+             'Proof of dishonour not available — essential ingredient missing'),
+            ('postal_proof_available',   'Postal Proof of Notice', 'Moderate',
+             'Notice service cannot be established — accused may deny receipt'),
         ]:
             if not case_meta.get(field, True):
                 doc_gaps.append({
-                    'document': label,
-                    'status': 'Not available',
-                    'impact': 'Defence can challenge existence of debt / notice service',
-                    'remedy': 'Obtain before filing'
+                    'gap_name':  label,       # ← PDF template reads gap_name
+                    'document':  label,
+                    'severity':  sev,
+                    'status':    'Not available',
+                    'impact':    imp,
+                    'remedy':    'Obtain before filing'
                 })
 
     # ── Defence analysis ────────────────────────────────────────
@@ -9105,7 +9176,8 @@ def generate_executive_report(analysis_data: Dict) -> Dict:
         "footer": {
             "prepared_by": "JUDIQ AI Intelligence Engine v10.0",
             "generated_at": datetime.now().strftime("%d %B %Y, %H:%M"),
-            "processing_time": f"{proc_time:.2f}s" if proc_time else "< 1s",
+            "processing_time": f"{proc_time:.2f}s" if (proc_time and proc_time > 0) else "< 1s",
+            "processing_time_seconds": round(proc_time, 2) if proc_time else 0,
             "classification": "CONFIDENTIAL — FOR AUTHORIZED USE ONLY",
             "disclaimer": "NOT LEGAL ADVICE — Consult qualified legal counsel before acting on this report."
         }
@@ -11405,7 +11477,11 @@ def _build_flat_report(a: dict) -> dict:
         'case_id':              _s(a.get('case_id')),
         'generated_date':       _s(a.get('analysis_timestamp','')[:10]),
         'engine_version':       _s(a.get('engine_version'), 'v10.0'),
-        'processing_time':      f"{_n(a.get('processing_time_seconds'))}s",
+        'processing_time':      f"{_n(a.get('processing_time_seconds') or a.get('processing_time',0))}s",
+        'processing_time_display': (
+            f"{_n(a.get('processing_time_seconds')):.2f}s"
+            if a.get('processing_time_seconds') else '< 1s'
+        ),
 
         # ── Score ──
         'overall_score':        score,
