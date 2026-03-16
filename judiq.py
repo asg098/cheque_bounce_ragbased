@@ -8198,6 +8198,8 @@ def _safe_score(val, fallback=0.0):
 
 
 def generate_clean_professional_report(analysis: Dict, case_data: Dict) -> Dict:
+    # Read from central result object when available — guaranteed non-null fields
+    R = analysis.get('_result', {})
 
     risk        = analysis.get('modules', {}).get('risk_assessment', {}) or {}
     timeline    = analysis.get('modules', {}).get('timeline_intelligence', {}) or {}
@@ -8389,13 +8391,15 @@ def generate_clean_professional_report(analysis: Dict, case_data: Dict) -> Dict:
 
     risk_breakdown = {
         'title': 'RISK SCORE BREAKDOWN',
-        'overall_score': f"{score}/100",
-        'compliance_level': _safe(risk.get('compliance_level'), 'Under Review'),
-        'fatal_override_active': fatal_flag,
-        'fatal_override_note': (
-            f"Score capped at {score} due to {len(fatal_defects)} fatal defect(s)"
+        'overall_score': R.get('overall_score_display', f"{score}/100"),
+        'compliance_level': R.get('compliance_level', _safe(risk.get('compliance_level'), 'Under Review')),
+        'fatal_override_active': R.get('fatal_override_applied', fatal_flag),
+        'fatal_override_note': R.get('fatal_override_note',
+            f"Score capped at {R.get('capped_at_display','N/A')} due to {R.get('fatal_defects_count',0)} fatal defect(s)"
             if fatal_flag else "No fatal override applied"
         ),
+        'original_score': f"{R.get('original_score', score)}/100",
+        'capped_at': R.get('capped_at_display', 'N/A'),
         'category_breakdown': breakdown,
         'scoring_note': (
             'Score starts at 100. Deductions applied per severity: '
@@ -8430,8 +8434,9 @@ def generate_clean_professional_report(analysis: Dict, case_data: Dict) -> Dict:
             name for name, available, imp in doc_items
             if not available and 'essential' in imp
         ],
+        'document_gaps': R.get('documentary_gaps', []),
         'score_explanation': (
-            f"Documentary strength is {_safe_score(documentary.get('overall_strength_score'))}/100. "
+            f"Documentary strength is {R.get('documentary_score', _safe_score(documentary.get('overall_strength_score')))}/100. "
             + ("Written agreement and ledger are missing — without these, the accused can challenge "
                "the existence of legally enforceable debt, which is a fundamental Section 138 ingredient."
                if not case_data.get('written_agreement_exists') else
@@ -8503,12 +8508,12 @@ def generate_clean_professional_report(analysis: Dict, case_data: Dict) -> Dict:
     }
 
     # ── SECTION 7: JUDICIAL BEHAVIOUR ────────────────────────────
-    jb_confidence = judicial.get('confidence', 'LOW')
+    jb_confidence = R.get('court_confidence', judicial.get('confidence', 'LOW'))
     jb_indices = judicial.get('behavioral_indices', {})
     if jb_confidence in ('HIGH', 'MEDIUM') and jb_indices:
         judicial_section = {
             'title': 'JUDICIAL BEHAVIOUR ANALYSIS',
-            'court': _safe(judicial.get('court_identified'), case_data.get('court_location', 'Not specified')),
+            'court': R.get('court_name', _safe(judicial.get('court_identified'), case_data.get('court_location', 'Not specified'))),
             'confidence': jb_confidence,
             'sample_size': judicial.get('sample_size', 0),
             'behavioral_indices': {
@@ -8520,13 +8525,14 @@ def generate_clean_professional_report(analysis: Dict, case_data: Dict) -> Dict:
     else:
         judicial_section = {
             'title': 'JUDICIAL BEHAVIOUR ANALYSIS',
-            'court': _safe(case_data.get('court_location'), 'Not specified'),
+            'court': R.get('court_name', _safe(case_data.get('court_location'), 'Not specified')),
             'confidence': 'INSUFFICIENT DATA',
-            'note': (
+            'note': R.get('court_note',
                 'Judicial behaviour analysis is unavailable — '
                 'insufficient case data for this court in the knowledge base. '
                 'Analysis will improve as more judgments are added.'
-            )
+            ),
+            'indices': R.get('court_indices', {})
         }
 
     # ── SECTION 8: CROSS-EXAMINATION RISK ────────────────────────
@@ -8534,8 +8540,8 @@ def generate_clean_professional_report(analysis: Dict, case_data: Dict) -> Dict:
     likely_qs  = cross_exam.get('likely_questions', [])
     cx_section = {
         'title': 'CROSS-EXAMINATION RISK',
-        'overall_risk': _safe(cross_exam.get('overall_cross_exam_risk'), 'Not assessed'),
-        'vulnerability_zones': [
+        'overall_risk': R.get('cross_exam_risk', _safe(cross_exam.get('overall_cross_exam_risk'), 'Not assessed')),
+        'vulnerability_zones': R.get('cross_exam_zones') or [
             {
                 'zone': _safe(z.get('zone', z.get('area'))),
                 'risk': _safe(z.get('risk_level', z.get('severity'))),
@@ -8543,7 +8549,7 @@ def generate_clean_professional_report(analysis: Dict, case_data: Dict) -> Dict:
             }
             for z in vuln_zones[:5]
         ] if vuln_zones else [],
-        'likely_questions': likely_qs[:8] if likely_qs else [
+        'likely_questions': R.get('cross_exam_questions') or likely_qs[:8] or [
             'Can you produce the original loan agreement in writing?',
             'How was the money transferred — cash, cheque, or bank transfer?',
             'Is it not true the cheque was given as security and not towards repayment?',
@@ -8574,7 +8580,7 @@ def generate_clean_professional_report(analysis: Dict, case_data: Dict) -> Dict:
         'overall_score': f"{score}/100",
         'one_line_verdict': one_liner,
         'recommended_action': recommended_action,
-        'immediate_actions': immediate_actions[:5],
+        'immediate_actions': R.get('next_actions', immediate_actions)[:5],
         'disclaimer': (
             'This report is a structured statutory compliance assessment. '
             'It does not constitute legal advice. All findings must be reviewed '
@@ -11005,6 +11011,206 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         # Sanitize all module outputs — removes None/empty that cause PDF broken characters
         if "modules" in analysis_report:
             analysis_report["modules"] = sanitize_module_output(analysis_report["modules"])
+
+        # ── BUILD CENTRAL RESULT OBJECT ──────────────────────────────────────
+        # Single source of truth for all report generators.
+        # Every field guaranteed non-null. Report template reads ONLY from here.
+        _risk   = analysis_report.get('modules', {}).get('risk_assessment', {}) or {}
+        _tl     = analysis_report.get('modules', {}).get('timeline_intelligence', {}) or {}
+        _ing    = analysis_report.get('modules', {}).get('ingredient_compliance', {}) or {}
+        _doc    = analysis_report.get('modules', {}).get('documentary_strength', {}) or {}
+        _def    = analysis_report.get('modules', {}).get('procedural_defects', {}) or {}
+        _defm   = analysis_report.get('modules', {}).get('defence_matrix', {}) or {}
+        _cx     = analysis_report.get('modules', {}).get('cross_examination_risk', {}) or {}
+        _jud    = analysis_report.get('modules', {}).get('judicial_behavior', {}) or {}
+        _pres   = analysis_report.get('modules', {}).get('presumption_analysis', {}) or {}
+        _sett   = analysis_report.get('modules', {}).get('settlement_analysis', {}) or {}
+        _is_fatal = bool(analysis_report.get('fatal_flag'))
+
+        # Collect ALL fatal defects from all modules — deduplicated
+        _all_fatals = []
+        _all_fatals += (_risk.get('fatal_defects') or [])
+        _all_fatals += (_def.get('fatal_defects') or [])
+        _all_fatals += (_ing.get('fatal_defects') or [])
+        _seen_f, _uniq_f = set(), []
+        for _fd in _all_fatals:
+            _k = _fd.get('defect', str(_fd))
+            if _k not in _seen_f:
+                _seen_f.add(_k); _uniq_f.append(_fd)
+
+        # Category scores — guaranteed numeric
+        _cat = _risk.get('category_scores', {}) or {}
+        def _cscore(name, fb=0.0):
+            d = _cat.get(name)
+            try: return round(float(d.get('score') if isinstance(d,dict) else d), 1)
+            except: return fb
+
+        # Fatal override display — the "Capped at undefined" fix
+        _orig_score  = round(_risk.get('overall_risk_score', 0), 1)
+        _fdo         = _risk.get('fatal_defect_override', {}) or _risk.get('hard_fatal_override', {}) or {}
+        _orig_before = round(_fdo.get('original_score', _fdo.get('original_weighted_score', _orig_score)), 1)
+        _cap_val     = round(_fdo.get('capped_at', _fdo.get('overridden_score', _orig_score)), 1)
+        _cap_display = f"{_cap_val}/100"
+
+        # Processing time — guaranteed string, never "undefineds"
+        _pt_secs  = analysis_report.get('processing_time_seconds', 0) or 0
+        _pt_str   = f"{round(_pt_secs, 2):.2f}s" if _pt_secs > 0 else "< 1s"
+
+        # Timeline score — use module's score field, fall back to category score
+        _tl_score = _tl.get('score', _cscore('Timeline Compliance', 50))
+
+        # Documentary gaps — always named
+        _doc_gaps = []
+        for _field, _label, _sev, _imp in [
+            ('written_agreement_exists', 'No written loan/transaction agreement', 'Severe',
+             'Debt enforceability highly contestable — accused can deny legally enforceable debt'),
+            ('ledger_available',         'No ledger or account records',           'High',
+             'Transaction trail incomplete — no financial record of the alleged loan'),
+            ('postal_proof_available',   'No postal proof of notice',              'Moderate',
+             'Notice service unproven — accused can deny receiving the legal notice'),
+            ('original_cheque_available','Original cheque not secured',            'High',
+             'Primary instrument unavailable — foundational evidence at risk'),
+            ('return_memo_available',    'Bank dishonour memo missing',            'Severe',
+             'Proof of dishonour not secured — essential statutory ingredient at risk'),
+        ]:
+            if not case_data.get(_field, True):
+                _doc_gaps.append({'gap_name': _label, 'severity': _sev,
+                                   'impact': _imp, 'remedy': 'Obtain before filing'})
+
+        # Cross-examination questions — always populated
+        _cx_questions = list(_cx.get('likely_questions', []) or [])
+        if not _cx_questions:
+            if not case_data.get('written_agreement_exists'):
+                _cx_questions.append("Is it correct that there is no written agreement evidencing the alleged loan?")
+                _cx_questions.append("Can you explain why such a large amount was given without any documentation?")
+            if 'PREMATURE' in str(_tl.get('compliance_status', {}).get('limitation', '')).upper():
+                _cx_questions.append("Was this complaint filed before the 15-day payment notice period had expired?")
+                _cx_questions.append("Are you aware that a complaint under Section 138 is not maintainable before the cause of action arises?")
+            if not case_data.get('postal_proof_available'):
+                _cx_questions.append("Do you have an Acknowledgment Due (AD) card proving the accused received your notice?")
+            if not case_data.get('ledger_available'):
+                _cx_questions.append("Can you produce any bank statement or ledger entry showing the transfer of this amount?")
+            _cx_questions.append("On what date exactly was the cheque amount given to the accused, and in what form — cash, cheque, or bank transfer?")
+            _cx_questions.append("Who was present at the time the alleged loan was made?")
+        if not _cx_questions:
+            _cx_questions = [
+                "Is it correct that there is no written record of this transaction?",
+                "Can you produce any independent witness to the alleged transaction?",
+                "Was the cheque given as security for a debt or as direct payment?",
+            ]
+
+        # Next actions — always structured dicts
+        _next_actions = []
+        for _fd in _uniq_f[:3]:
+            _next_actions.append({
+                'action':  str(_fd.get('remedy', _fd.get('defect', 'Address fatal defect')) or 'Consult legal counsel'),
+                'urgency': 'URGENT',
+                'details': str(_fd.get('impact', 'This defect will cause dismissal of the complaint') or '')
+            })
+        if not case_data.get('postal_proof_available'):
+            _next_actions.append({'action': 'Obtain AD card or speed-post tracking confirmation for notice',
+                                   'urgency': 'HIGH', 'details': 'Without postal proof, notice service can be challenged'})
+        if not case_data.get('written_agreement_exists'):
+            _next_actions.append({'action': 'Collect WhatsApp/email/SMS evidence of the transaction',
+                                   'urgency': 'MEDIUM', 'details': 'Absence of written agreement is primary defence weakness'})
+        if not _next_actions:
+            _next_actions.append({'action': 'Proceed with final legal review before filing',
+                                   'urgency': 'NORMAL', 'details': 'Case is in reasonable position'})
+
+        # Presumption
+        _pres_stage  = str(_pres.get('current_stage', 'Not assessed') or 'Not assessed')
+        _pres_burden = str(_pres.get('burden_position', 'Not assessed') or 'Not assessed')
+
+        # Judicial behaviour
+        _jud_conf    = str(_jud.get('confidence', 'Insufficient data') or 'Insufficient data')
+        _jud_court   = str(_jud.get('court_identified', case_data.get('court_location', 'Not specified')) or 'Not specified')
+        _jud_note    = (
+            'Judicial behaviour analysis unavailable — insufficient court data in knowledge base.'
+            if _jud_conf in ('LOW', 'Insufficient data', 'Not available') else
+            f"Based on cases from {_jud_court}. Confidence: {_jud_conf}."
+        )
+
+        # Filing verdict
+        if _is_fatal:
+            _filing_verdict = "DO NOT FILE — FATAL DEFECTS PRESENT"
+        elif _orig_score >= 75:
+            _filing_verdict = "READY TO FILE — STRONG CASE"
+        elif _orig_score >= 55:
+            _filing_verdict = "FILE WITH CAUTION — EVIDENCE GAPS PRESENT"
+        else:
+            _filing_verdict = "HIGH RISK — REMEDIATION REQUIRED BEFORE FILING"
+
+        # ── Store central result object ───────────────────────────
+        analysis_report['_result'] = {
+            # Scores
+            'overall_score':         _orig_score,
+            'overall_score_display': f"{_orig_score:.1f}/100",
+            'original_score':        _orig_before,
+            'capped_at':             _cap_val,
+            'capped_at_display':     _cap_display,
+            'fatal_override_applied': _is_fatal and bool(_fdo),
+            'fatal_override_note':   (
+                f"Original: {_orig_before}/100 → Capped at {_cap_display} due to fatal defect"
+                if (_is_fatal and bool(_fdo)) else
+                "No fatal override applied"
+            ),
+            'timeline_score':        _tl_score,
+            'ingredient_score':      _cscore('Ingredient Compliance'),
+            'documentary_score':     _cscore('Documentary Strength', _doc.get('overall_strength_score', 0)),
+            'procedural_score':      _cscore('Procedural Compliance'),
+            'liability_score':       _cscore('Liability Expansion'),
+            'compliance_level':      str(_risk.get('compliance_level', 'Under Review') or 'Under Review'),
+            # Fatal
+            'is_fatal':              _is_fatal,
+            'fatal_defects_count':   len(_uniq_f),
+            'fatal_defects':         [
+                {'defect':   str(d.get('defect','Unknown defect')),
+                 'severity': str(d.get('severity','CRITICAL')),
+                 'impact':   str(d.get('impact','Complaint will be dismissed') or ''),
+                 'remedy':   str(d.get('remedy', d.get('cure','Consult legal counsel')) or 'Consult legal counsel')}
+                for d in _uniq_f
+            ],
+            # Filing
+            'filing_verdict':        _filing_verdict,
+            # Time
+            'processing_time':       _pt_str,
+            'processing_time_seconds': _pt_secs,
+            # Documentary
+            'documentary_gaps':      _doc_gaps,
+            'documentary_gaps_count': len(_doc_gaps),
+            # Cross-exam
+            'cross_exam_questions':  _cx_questions[:8],
+            'cross_exam_risk':       str(_cx.get('overall_cross_exam_risk') or _cx.get('overall_risk') or 'Not assessed'),
+            'cross_exam_zones':      [
+                {'zone': str(z.get('zone', z.get('area',''))),
+                 'risk': str(z.get('risk_level', z.get('severity','MEDIUM')))}
+                for z in (_cx.get('vulnerability_zones') or [])[:4]
+            ],
+            # Presumption
+            'presumption_stage':     _pres_stage,
+            'burden_position':       _pres_burden,
+            'presumption_activated': bool(_pres.get('presumption_activated') or _pres.get('presumption_triggered')),
+            # Judicial
+            'court_name':            _jud_court,
+            'court_confidence':      _jud_conf,
+            'court_note':            _jud_note,
+            'court_indices':         {k: str(v) for k,v in (_jud.get('behavioral_indices') or {}).items()},
+            # Next actions
+            'next_actions':          _next_actions,
+            # Settlement
+            'cheque_amount':         case_data.get('cheque_amount', 0),
+            'settlement_recommended': bool(_sett.get('settlement_recommended')),
+            'settlement_range':      str(_sett.get('recommended_settlement_range', 'Not calculated') or 'Not calculated'),
+            # Platform
+            'platform_name':         'JUDIQ Legal Intelligence Platform',
+            'platform_email':        'hello@judiq.ai',
+            'platform_website':      'www.judiq.ai',
+            'case_id':               str(analysis_report.get('case_id', '')),
+            'generated_date':        datetime.now().strftime('%d %B %Y'),
+            'engine_version':        str(analysis_report.get('engine_version', 'v10.0')),
+        }
+        logger.info(f"✅ Central result object built: {len(analysis_report['_result'])} fields")
+
         analysis_report['professional_report'] = generate_clean_professional_report(analysis_report, case_data)
 
         # Verdict already enforced before executive summary (line 7456)
@@ -11566,8 +11772,8 @@ def _build_flat_report(a: dict) -> dict:
                                    'Insufficient court data — analysis unavailable'),
 
         # ── Presumption ──
-        'presumption_stage':    _s(pres.get('current_stage'), 'Not assessed'),
-        'burden_position':      _s(pres.get('burden_position'), 'Not assessed'),
+        'presumption_stage':    R.get('presumption_stage', _s(pres.get('current_stage'), 'Not assessed')),
+        'burden_position':      R.get('burden_position', _s(pres.get('burden_position'), 'Not assessed')),
         'presumption_activated': bool(pres.get('presumption_activated') or pres.get('presumption_triggered')),
 
         # ── Cross-examination ──
@@ -11740,6 +11946,7 @@ async def analyze_case(request: CaseAnalysisRequest, http_request: Request = Non
             "plain_summary":     plain_summary,
             "executive_summary": analysis.get('executive_summary', {}),
             "report":            analysis.get('professional_report', {}),
+            "result":            analysis.get('_result', {}),   # ← central result object — PDF template reads this
             # ── Full detail ────────────────────────────────────────────
             "analysis": analysis,
             "api_response_time_ms": round((time.time() - start) * 1000, 1),
