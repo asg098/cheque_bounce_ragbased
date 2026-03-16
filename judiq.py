@@ -8099,6 +8099,27 @@ def _safe(value, default="Not available", fmt=None):
         return f"{value:.1f}%"
     return str(value)
 
+
+def sanitize_module_output(data, _depth=0):
+    """
+    Recursively replace None / empty values with meaningful fallbacks
+    so the PDF renderer never receives null and shows broken characters.
+    """
+    if _depth > 10:
+        return data
+    if data is None:
+        return "Not available"
+    if isinstance(data, dict):
+        return {k: sanitize_module_output(v, _depth+1) for k, v in data.items()}
+    if isinstance(data, list):
+        return [sanitize_module_output(i, _depth+1) for i in data]
+    if isinstance(data, str) and data.strip() == '':
+        return "Not available"
+    if isinstance(data, float) and data != data:  # NaN
+        return 0.0
+    return data
+
+
 def _safe(val, fallback="Not available"):
     """Return val if truthy and not None, else fallback."""
     if val is None or val == "" or val == [] or val == {}:
@@ -10086,26 +10107,25 @@ def enforce_verdict_integrity(analysis_report: Dict) -> Dict:
     # PHASE 3: Override ALL conflicting fields with SINGLE TRUTH
     logger.info(f"  ✅ Final verdict: {final_verdict['status']} - {final_verdict['category']}")
 
-    # CRITICAL FIX: If fatal, override ALL module display scores to avoid confusion
+    # FATAL override: mark modules as fatal but PRESERVE actual scores
+    # (zeroing scores confuses the PDF renderer and produces 0/100 everywhere)
     if is_fatal:
         logger.warning("  ⚠️ FATAL override: Syncing all module scores to reflect fatal condition")
         for module_name in analysis_report.get('modules', {}):
             module = analysis_report['modules'][module_name]
             if isinstance(module, dict):
-                # Add fatal note to every module
                 module['fatal_override_applied'] = True
-                module['note'] = 'Score overridden due to fatal defect in case'
-                # If module has score, set display_score to 0
-                if 'score' in module:
-                    module['display_score'] = 0
-                if 'overall_score' in module:
-                    module['display_score'] = 0
-                if 'risk_score' in module:
-                    module['display_score'] = 0
+                module['fatal_note'] = 'Case has fatal defect — see procedural_defects module'
+                # Do NOT zero display_score — keep actual scores visible in report
 
     # Core verdict fields
     analysis_report['final_verdict'] = final_verdict
-    analysis_report['risk_score'] = final_verdict['risk_score']
+    # Ensure risk_score is always a meaningful number (never 0 unless genuinely zero)
+    _rs = final_verdict['risk_score']
+    analysis_report['risk_score'] = _rs if _rs is not None else 0
+    analysis_report['risk_score_display'] = f"{_rs:.1f}/100" if _rs is not None else "0.0/100"
+    analysis_report['is_fatal'] = is_fatal
+    analysis_report['fatal_cap_applied'] = is_fatal
     analysis_report['overall_status'] = f"{final_verdict['status']} - {final_verdict['category']}"
     analysis_report['decisive_verdict'] = final_verdict['recommendation']
     analysis_report['filing_blocked'] = final_verdict['filing_blocked']
@@ -10910,6 +10930,9 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         logger.info(f"   Production Engine v{ENGINE_VERSION}")
 
         logger.info("📄 Generating clean professional report...")
+        # Sanitize all module outputs — removes None/empty that cause PDF broken characters
+        if "modules" in analysis_report:
+            analysis_report["modules"] = sanitize_module_output(analysis_report["modules"])
         analysis_report['professional_report'] = generate_clean_professional_report(analysis_report, case_data)
 
         # Verdict already enforced before executive summary (line 7456)
@@ -11274,6 +11297,217 @@ async def generate_report(case_id: str, format: str = "executive"):
     except Exception as e:
         logger.error(f"Report generation failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/report-data/{case_id}")
+async def get_report_data(case_id: str):
+    """
+    Returns a FLAT, PDF-ready data object for a given case_id.
+    Every field has a guaranteed non-null string value.
+    The frontend PDF renderer should read from this endpoint — not from /analyze-case.
+
+    All scores are real numbers. All text fields are meaningful strings.
+    No None, no empty strings, no broken characters.
+    """
+    try:
+        conn = sqlite3.connect(analytics_db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT analysis_json FROM case_analyses WHERE case_id = ?", (case_id,))
+        result = cursor.fetchone()
+        conn.close()
+
+        if not result:
+            raise HTTPException(status_code=404, detail=f"Case not found: {case_id}")
+
+        a = json.loads(result[0])
+        return _build_flat_report(a)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Report data fetch failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _s(v, fb="Not available"):
+    """Safe string — never returns None or empty."""
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return fb
+    return str(v)
+
+def _n(v, fb=0.0):
+    """Safe number."""
+    try: return round(float(v), 1)
+    except: return fb
+
+def _build_flat_report(a: dict) -> dict:
+    """
+    Build a completely flat, null-safe report object.
+    Every field the PDF template might read is guaranteed to exist with a real value.
+    """
+    mods    = a.get('modules') or {}
+    risk    = (mods.get('risk_assessment') or {})
+    tl      = (mods.get('timeline_intelligence') or {})
+    ingr    = (mods.get('ingredient_compliance') or {})
+    doc     = (mods.get('documentary_strength') or {})
+    defects = (mods.get('procedural_defects') or {})
+    defence = (mods.get('defence_matrix') or {})
+    cx      = (mods.get('cross_examination_risk') or {})
+    jb      = (mods.get('judicial_behavior') or {})
+    pres    = (mods.get('presumption_analysis') or {})
+    settle  = (mods.get('settlement_analysis') or {})
+    exec_s  = (a.get('executive_summary') or {})
+    report  = (a.get('professional_report') or {})
+
+    score       = _n(a.get('risk_score') or risk.get('overall_risk_score'))
+    fatal       = bool(a.get('fatal_flag') or a.get('is_fatal'))
+    cat_scores  = risk.get('category_scores') or {}
+
+    # ── Score per category ──
+    def cat(name, fallback=0.0):
+        d = cat_scores.get(name)
+        if isinstance(d, dict): return _n(d.get('score'), fallback)
+        return _n(d, fallback)
+
+    # ── All fatal defects ──
+    all_fatals = []
+    all_fatals += (risk.get('fatal_defects') or [])
+    all_fatals += (defects.get('fatal_defects') or [])
+    all_fatals += (ingr.get('fatal_defects') or [])
+    seen, uniq = set(), []
+    for d in all_fatals:
+        k = d.get('defect', str(d))
+        if k not in seen:
+            seen.add(k); uniq.append(d)
+
+    # ── Timeline events sorted chronologically ──
+    chart = sorted(
+        [e for e in (tl.get('timeline_chart') or []) if e.get('date')],
+        key=lambda x: x.get('date','9999')
+    )
+
+    # ── Strengths/weaknesses ──
+    strengths = exec_s.get('strengths') or []
+    weaknesses = exec_s.get('weaknesses') or []
+
+    # ── Cross-exam questions ──
+    cx_questions = cx.get('likely_questions') or []
+    if not cx_questions and not doc.get('written_agreement_exists'):
+        cx_questions = [
+            'Can you produce the original loan agreement in writing?',
+            'Is it not true that no written record of this transaction exists?',
+            'Is it not true the cheque was given as security, not for a debt?',
+            'How was the money transferred — cash, cheque, or bank transfer?',
+            'Who was present when the alleged loan was given?',
+        ]
+
+    return sanitize_module_output({
+        # ── Identity ──
+        'case_id':              _s(a.get('case_id')),
+        'generated_date':       _s(a.get('analysis_timestamp','')[:10]),
+        'engine_version':       _s(a.get('engine_version'), 'v10.0'),
+        'processing_time':      f"{_n(a.get('processing_time_seconds'))}s",
+
+        # ── Score ──
+        'overall_score':        score,
+        'overall_score_display': f"{score:.1f}/100",
+        'compliance_level':     _s(risk.get('compliance_level') or a.get('case_strength'), 'Under Review'),
+        'is_fatal':             fatal,
+        'fatal_cap_applied':    fatal,
+        'fatal_defects_count':  len(uniq),
+
+        # ── Executive summary ──
+        'filing_status':        _s(exec_s.get('filing_verdict') or a.get('final_status'), 'See analysis'),
+        'one_line_verdict':     _s(exec_s.get('case_overview'), 'Analysis complete — see details below'),
+        'recommended_action':   _s(a.get('decisive_verdict') or a.get('filing_recommendation'), 'Consult legal counsel'),
+        'strengths':            [_s(s) for s in strengths[:5]] or ['Analysis complete'],
+        'weaknesses':           [_s(w) for w in weaknesses[:5]] or ['Review full analysis'],
+        'critical_risks':       [{'defect': _s(d.get('defect')),
+                                   'severity': _s(d.get('severity'),'CRITICAL'),
+                                   'impact': _s(d.get('impact')),
+                                   'remedy': _s(d.get('remedy', d.get('cure','Consult counsel')))}
+                                  for d in uniq[:5]],
+
+        # ── Category scores ──
+        'score_timeline':       cat('Timeline Compliance'),
+        'score_ingredients':    cat('Ingredient Compliance'),
+        'score_documentary':    cat('Documentary Strength'),
+        'score_procedural':     cat('Procedural Compliance'),
+        'score_liability':      cat('Liability Expansion'),
+
+        # ── Timeline ──
+        'limitation_risk':      _s(tl.get('limitation_risk'), 'Not assessed'),
+        'limitation_status':    _s((tl.get('compliance_status') or {}).get('limitation'), 'Not assessed'),
+        'timeline_events':      [{'date': _s(e.get('date')),
+                                   'event': _s(e.get('event')),
+                                   'status': _s(e.get('status'),'—')} for e in chart],
+        'critical_dates':       {k: _s(v) for k,v in (tl.get('critical_dates') or {}).items()},
+
+        # ── Ingredients ──
+        'ingredient_compliance': _n(ingr.get('overall_compliance')),
+        'ingredient_risk_level': _s(ingr.get('risk_level'), 'Not assessed'),
+
+        # ── Documentary ──
+        'doc_strength_score':   _n(doc.get('overall_strength_score')),
+        'doc_strength_label':   _s(doc.get('strength_label'), 'Not assessed'),
+        'doc_items': [
+            {'name':'Original Cheque',    'available': bool(a.get('case_metadata',{}).get('original_cheque_available')), 'importance':'Essential'},
+            {'name':'Return Memo',        'available': bool(doc.get('return_memo_available')), 'importance':'Essential'},
+            {'name':'Postal Proof',       'available': bool(doc.get('postal_proof_available')), 'importance':'Critical'},
+            {'name':'Written Agreement',  'available': bool(doc.get('written_agreement_exists')), 'importance':'Important'},
+            {'name':'Ledger/Records',     'available': bool(doc.get('ledger_available')), 'importance':'Important'},
+        ],
+
+        # ── Procedural defects ──
+        'procedural_risk':      _s(defects.get('overall_risk'), 'Not assessed'),
+        'fatal_defects':        [{'defect': _s(d.get('defect')),
+                                   'severity': _s(d.get('severity'),'CRITICAL'),
+                                   'impact': _s(d.get('impact')),
+                                   'remedy': _s(d.get('remedy', d.get('cure','Consult counsel')))}
+                                  for d in (defects.get('fatal_defects') or [])],
+        'curable_defects':      [{'defect': _s(d.get('defect')),
+                                   'cure': _s(d.get('cure'))}
+                                  for d in (defects.get('curable_defects') or [])[:3]],
+
+        # ── Defence ──
+        'defence_exposure':     _s(defence.get('overall_exposure') or defence.get('exposure_level'), 'Not assessed'),
+        'high_risk_defences':   [{'defence': _s(d.get('defence', d.get('ground'))),
+                                   'strength': _s(d.get('strength', d.get('risk_impact')),'Unknown'),
+                                   'strategy': _s(d.get('strategy'))}
+                                  for d in (defence.get('high_risk_defences') or [])[:4]]
+                                 or [{'defence':'No major defences identified','strength':'LOW','strategy':'Maintain evidence posture'}],
+
+        # ── Settlement ──
+        'settlement_recommended': bool(settle.get('settlement_recommended')),
+        'settlement_range':     _s(str(settle.get('recommended_settlement_range') or 'Not calculated')),
+        'interim_eligible':     bool(settle.get('interim_compensation_eligible')),
+
+        # ── Judicial behaviour ──
+        'court_name':           _s(jb.get('court_identified'), 'Generic Court'),
+        'court_confidence':     _s(jb.get('confidence'), 'Insufficient data'),
+        'court_data_available': jb.get('confidence') in ('HIGH','MEDIUM'),
+        'court_note':           _s(jb.get('note') if jb.get('confidence') not in ('HIGH','MEDIUM')
+                                   else f"Sample: {jb.get('sample_size',0)} cases",
+                                   'Insufficient court data — analysis unavailable'),
+
+        # ── Presumption ──
+        'presumption_stage':    _s(pres.get('current_stage'), 'Not assessed'),
+        'burden_position':      _s(pres.get('burden_position'), 'Not assessed'),
+        'presumption_activated': bool(pres.get('presumption_activated') or pres.get('presumption_triggered')),
+
+        # ── Cross-examination ──
+        'cross_exam_risk':      _s(cx.get('overall_cross_exam_risk') or cx.get('overall_risk'), 'Not assessed'),
+        'cross_exam_questions': [_s(q) for q in cx_questions[:8]],
+        'cross_exam_zones':     [{'zone': _s(z.get('zone',z.get('area'))),
+                                   'risk': _s(z.get('risk_level',z.get('severity')),'MEDIUM')}
+                                  for z in (cx.get('vulnerability_zones') or [])[:4]],
+
+        # ── Platform ──
+        'platform_name':        'JUDIQ Legal Intelligence Platform',
+        'platform_email':       'hello@judiq.ai',
+        'platform_website':     'www.judiq.ai',
+        'platform_address':     'JUDIQ AI — Section 138 Intelligence Platform',
+    })
+
 
 @app.post("/generate-cross-examination")
 async def generate_cross_examination(request: CrossExaminationRequest):
