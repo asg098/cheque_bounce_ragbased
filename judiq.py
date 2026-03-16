@@ -7378,342 +7378,207 @@ def generate_executive_summary(
     presumption_data, cross_exam_data, judicial_behavior, contradiction_data,
     edge_case_data
 ) -> Dict:
+    """
+    Generate a rich executive summary that NEVER returns empty fields.
+    Robustly handles any module returning None, list, or malformed dict.
+    This is what lawyers read first — it must always be complete.
+    """
 
-    # Input validation - ensure all required data structures are dicts
-    required_dicts = {
-        'timeline_data': timeline_data,
-        'risk_data': risk_data,
-        'case_data': case_data,
-        'settlement_data': settlement_data,
-        'presumption_data': presumption_data,
-        'judicial_behavior': judicial_behavior,
-        'edge_case_data': edge_case_data,
-    }
+    def _s(v, fb="Not available"):
+        if v is None or v == "" or v == [] or v == {}:
+            return fb
+        return v
 
-    for name, data in required_dicts.items():
-        if not isinstance(data, dict):
-            logger.error(f"Invalid {name} type: {type(data)}, expected dict")
-            # Return minimal valid response
-            return {
-                'case_overview': 'Executive summary generation failed due to invalid data structure',
-                'strengths': [],
-                'weaknesses': [],
-                'critical_risks': [f'Data validation failed: {name} is not a dict'],
-                'strategic_recommendations': [],
-                'next_actions': [],
-                'overall_assessment': 'INVALID',
-                'edge_cases_alert': []
-            }
+    def _n(v, fb=0.0):
+        try: return round(float(v), 1)
+        except: return fb
 
-    summary = {
-        'case_overview': '',
-        'strengths': [],
-        'weaknesses': [],
-        'critical_risks': [],
-        'strategic_recommendations': [],
-        'next_actions': [],
-        'overall_assessment': '',
-        'edge_cases_alert': []
-    }
+    def _d(v):
+        return v if isinstance(v, dict) else {}
 
-    case_type = "Complainant" if case_data.get('case_type') == 'complainant' else "Accused"
-    amount = case_data.get('cheque_amount', 0)
-    summary['case_overview'] = f"{case_type} in Section 138 NI Act case involving cheque of Rs. {amount:,.2f}. " \
-                                f"Overall compliance score: {risk_data['overall_risk_score']:.1f}/100. " \
-                                f"Classification: {risk_data['compliance_level']}. " \
-                                f"Burden of proof: {presumption_data.get('burden_position', 'Unknown')}."
+    # Safe module data
+    risk_data      = _d(risk_data)
+    timeline_data  = _d(timeline_data)
+    defect_data    = _d(defect_data)
+    ingredient_data= _d(ingredient_data)
+    doc_data       = _d(doc_data)
+    settlement_data= _d(settlement_data)
+    presumption_data= _d(presumption_data)
+    judicial_behavior= _d(judicial_behavior)
+    edge_case_data = _d(edge_case_data)
+    defence_data   = _d(defence_data)
+    cross_exam_data= _d(cross_exam_data)
 
-    if edge_case_data.get('complexity_score', 0) >= 25:
-        summary['case_overview'] += f" ⚠️ Complexity: {edge_case_data['complexity_level']}."
+    score      = _n(risk_data.get('overall_risk_score'))
+    compliance = _s(risk_data.get('compliance_level'), 'Under Review')
+    amount     = case_data.get('cheque_amount', 0)
+    case_type  = "Complainant" if case_data.get('case_type') == 'complainant' else "Accused"
 
-    if judicial_behavior.get('confidence') in ['HIGH', 'MEDIUM']:
-        court_insight = f" Court behavioral analysis: Limitation strictness {judicial_behavior['behavioral_indices'].get('limitation_strictness', 'N/A')}/10, " \
-                       f"Settlement friendly {judicial_behavior['behavioral_indices'].get('settlement_friendly', 'N/A')}/10."
-        summary['case_overview'] += court_insight
+    # ── Collect ALL fatal defects from all modules ──
+    all_fatals = []
+    all_fatals.extend(risk_data.get('fatal_defects', []) or [])
+    all_fatals.extend(defect_data.get('fatal_defects', []) or [])
+    all_fatals.extend(ingredient_data.get('fatal_defects', []) or [])
+    seen, unique_fatals = set(), []
+    for d in all_fatals:
+        k = d.get('defect', str(d))
+        if k not in seen:
+            seen.add(k)
+            unique_fatals.append(d)
 
-    # Defensive check: contradiction_data might be list or dict
-    if isinstance(contradiction_data, dict) and contradiction_data.get('critical_contradictions', 0) > 0:
-        summary['case_overview'] += f" ⚠️ ALERT: {contradiction_data['critical_contradictions']} critical contradictions detected."
-    elif isinstance(contradiction_data, list) and len(contradiction_data) > 0:
-        summary['case_overview'] += f" ⚠️ ALERT: {len(contradiction_data)} contradictions detected."
+    fatal_flag = len(unique_fatals) > 0
 
-    if edge_case_data.get('detected_cases'):
-        summary['edge_cases_alert'] = edge_case_data['detected_cases']
-        if edge_case_data.get('complexity_score', 0) >= 50:
-            summary['critical_risks'].append({
-                'risk': 'High Complexity Case with Multiple Edge Cases',
-                'severity': 'HIGH',
-                'impact': f"{len(edge_case_data['detected_cases'])} edge cases detected requiring specialist handling"
-            })
-
-    for category, data in risk_data['category_scores'].items():
-        if (data.get('score') or 0) >= 80:
-            summary['strengths'].append(f"{category}: {data['score']:.1f}/100 - Excellent")
-
-    for category, data in risk_data['category_scores'].items():
-        if data['score'] < 60:
-            summary['weaknesses'].append(f"{category}: {data['score']:.1f}/100 - Needs attention")
-
-    if defect_data['fatal_defects']:
-        for defect in defect_data['fatal_defects']:
-            summary['critical_risks'].append({
-                'risk': defect['defect'],
-                'severity': defect['severity'],
-                'impact': defect['impact']
-            })
-
-    if ingredient_data['fatal_defects']:
-        for defect in ingredient_data['fatal_defects']:
-            summary['critical_risks'].append({
-                'risk': f"Ingredient {defect['ingredient']}: {defect['defect']}",
-                'severity': defect['severity'],
-                'impact': defect['explanation']
-            })
-
-    if case_data.get('case_type') == 'complainant':
-
-        if (risk_data.get('overall_risk_score') or 0) >= 70:
-            summary['strategic_recommendations'].append({
-                'priority': 'HIGH',
-                'recommendation': 'Push for trial - strong case for conviction',
-                'rationale': 'High compliance score indicates solid case'
-            })
-            if settlement_data['interim_compensation_eligible']:
-                summary['strategic_recommendations'].append({
-                    'priority': 'HIGH',
-                    'recommendation': 'Apply for interim compensation (20% of amount) immediately',
-                    'rationale': 'Create financial pressure on accused while building to trial'
-                })
-        else:
-            summary['strategic_recommendations'].append({
-                'priority': 'HIGH',
-                'recommendation': 'Strengthen case or explore settlement',
-                'rationale': 'Case has weaknesses that may lead to acquittal'
-            })
-
-        if presumption_data.get('presumption_activated'):
-            if presumption_data.get('rebuttal_strength') in ['HIGH', 'MEDIUM']:
-                summary['strategic_recommendations'].append({
-                    'priority': 'URGENT',
-                    'recommendation': f"Prepare for strong rebuttal - accused has {presumption_data['rebuttal_strength']} evidence",
-                    'rationale': 'Burden may shift back to complainant - strengthen debt proof'
-                })
-            else:
-                summary['strategic_recommendations'].append({
-                    'priority': 'MEDIUM',
-                    'recommendation': 'Rely on Section 139 presumption - accused rebuttal weak',
-                    'rationale': 'Presumption active with weak rebuttal - strong position'
-                })
-
-        if cross_exam_data.get('overall_risk') in ['CRITICAL', 'HIGH']:
-            summary['strategic_recommendations'].append({
-                'priority': 'URGENT',
-                'recommendation': 'Intensive cross-examination preparation required',
-                'rationale': f"{cross_exam_data['overall_risk']} - Multiple vulnerability zones identified"
-            })
-
-        if doc_data['overall_strength_score'] < 60:
-            summary['strategic_recommendations'].append({
-                'priority': 'URGENT',
-                'recommendation': 'Urgently gather additional documentary evidence',
-                'rationale': 'Documentary evidence is weak - over-reliance on presumption risky'
-            })
-
-        if judicial_behavior.get('behavioral_indices', {}).get('limitation_strictness', 0) >= CONFIG['STRICTNESS_INDEX_HIGH']:
-            summary['strategic_recommendations'].append({
-                'priority': 'HIGH',
-                'recommendation': 'Ensure strict timeline compliance - court shows high limitation strictness',
-                'rationale': f"Court limitation strictness: {judicial_behavior['behavioral_indices']['limitation_strictness']}/10"
-            })
-
+    # ── Filing verdict ──
+    if fatal_flag:
+        filing_verdict = "DO NOT FILE — FATAL DEFECTS PRESENT"
+        assessment     = "FATAL FAILURE"
+    elif score >= 75:
+        filing_verdict = "READY TO FILE — STRONG CASE"
+        assessment     = "COMPLIANT"
+    elif score >= 55:
+        filing_verdict = "FILE WITH CAUTION — GAPS PRESENT"
+        assessment     = "MODERATE RISK"
     else:
+        filing_verdict = "HIGH RISK — REMEDIATION REQUIRED BEFORE FILING"
+        assessment     = "WEAK CASE"
 
-        if risk_data['overall_risk_score'] < 50:
-            summary['strategic_recommendations'].append({
-                'priority': 'HIGH',
-                'recommendation': 'Fight the case - good chance of acquittal',
-                'rationale': 'Complainant case has critical weaknesses'
-            })
-            if defence_data['strongest_defence']:
-                summary['strategic_recommendations'].append({
-                    'priority': 'HIGH',
-                    'recommendation': f"Focus defence on: {defence_data['strongest_defence']['defence']}",
-                    'rationale': f"This defence has {defence_data['strongest_defence']['strength']} strength"
-                })
-        else:
-            summary['strategic_recommendations'].append({
-                'priority': 'HIGH',
-                'recommendation': 'Explore settlement - strong case against accused',
-                'rationale': 'Risk of conviction high. Settlement may be cheaper than conviction + costs.'
-            })
+    # ── Case overview one-liner ──
+    limitation_status = _s(
+        (timeline_data.get('compliance_status') or {}).get('limitation'),
+        'Not assessed'
+    )
+    case_overview = (
+        f"{case_type} in Section 138 NI Act case | "
+        f"Cheque: ₹{indian_number_format(amount)} | "
+        f"Risk Score: {score}/100 | "
+        f"Classification: {compliance} | "
+        f"Limitation: {limitation_status}"
+    )
+    if unique_fatals:
+        case_overview += f" | ⚠️ {len(unique_fatals)} FATAL DEFECT(S) DETECTED"
 
-        if presumption_data.get('burden_position') == 'On Accused':
-            summary['strategic_recommendations'].append({
-                'priority': 'CRITICAL',
-                'recommendation': 'Burden of proof on accused - strong documentary rebuttal essential',
-                'rationale': f"Rebuttal evidence: {presumption_data.get('rebuttal_evidence_type', 'Weak')} - strengthen urgently"
-            })
+    # ── Strengths ──
+    strengths = []
+    cat_scores = risk_data.get('category_scores') or {}
+    for cat, data in cat_scores.items():
+        s = _n(data.get('score') if isinstance(data, dict) else data)
+        if s >= 75:
+            strengths.append(f"{cat}: {s}/100 — Strong ✅")
+    if case_data.get('return_memo_available'):
+        strengths.append("Dishonour memo available — primary evidence secured ✅")
+    if case_data.get('postal_proof_available'):
+        strengths.append("Postal proof available — notice service established ✅")
+    if case_data.get('original_cheque_available'):
+        strengths.append("Original cheque available — foundational document present ✅")
+    if not strengths:
+        strengths.append("Core transaction facts established")
 
-        if cross_exam_data.get('vulnerability_zones'):
-            critical_zones = [z for z in cross_exam_data['vulnerability_zones'] if z['severity'] in ['CRITICAL', 'HIGH']]
-            if critical_zones:
-                summary['strategic_recommendations'].append({
-                    'priority': 'URGENT',
-                    'recommendation': f"Prepare defense for {len(critical_zones)} critical cross-examination vulnerabilities",
-                    'rationale': 'Prosecution will attack weak zones - prepare answers in advance'
-                })
+    # ── Weaknesses ──
+    weaknesses = []
+    for cat, data in cat_scores.items():
+        s = _n(data.get('score') if isinstance(data, dict) else data)
+        if s < 60:
+            reason = (data.get('reason', '') or '') if isinstance(data, dict) else ''
+            weaknesses.append(
+                f"{cat}: {s}/100 — {reason or 'Needs strengthening'} ❌"
+            )
+    if not case_data.get('written_agreement_exists'):
+        weaknesses.append("No written agreement — debt enforceability can be challenged ❌")
+    if not case_data.get('ledger_available'):
+        weaknesses.append("No ledger/records — transaction trail incomplete ❌")
+    if not case_data.get('postal_proof_available'):
+        weaknesses.append("No postal proof — notice service presumption weak ❌")
+    if not weaknesses:
+        weaknesses.append("No critical weaknesses at this stage")
 
-    if summary['critical_risks']:
-        summary['next_actions'].append({
-            'action': 'Address critical defects immediately',
-            'urgency': 'URGENT',
-            'details': 'Fatal defects detected that may lead to dismissal/discharge'
+    # ── Critical risks ──
+    critical_risks = []
+    for d in unique_fatals[:5]:
+        critical_risks.append({
+            'risk':     _s(d.get('defect')),
+            'severity': _s(d.get('severity'), 'CRITICAL'),
+            'impact':   _s(d.get('impact')),
+            'remedy':   _s(d.get('remedy', d.get('cure', 'Consult legal counsel')))
+        })
+    # Also add high-risk defence items
+    for hr in (defence_data.get('high_risk_defences') or [])[:2]:
+        critical_risks.append({
+            'risk':     _s(hr.get('defence', hr.get('ground'))),
+            'severity': 'HIGH',
+            'impact':   _s(hr.get('strategy', hr.get('risk_impact', 'Acquittal risk'))),
+            'remedy':   _s(hr.get('counter', hr.get('legal_basis', 'Strengthen evidence')))
         })
 
-    if doc_data.get('critical_gaps'):
-        summary['next_actions'].append({
-            'action': 'Obtain missing critical documents',
-            'urgency': 'HIGH',
-            'details': f"Missing: {', '.join([g.get('gap', g.get('category', 'Unknown')) for g in doc_data['critical_gaps']])}"
+    # ── Strategic recommendations ──
+    strategic_recommendations = []
+    if fatal_flag:
+        strategic_recommendations.append({
+            'priority': 'URGENT',
+            'recommendation': 'Address all fatal defects before filing',
+            'rationale': f"{len(unique_fatals)} fatal defect(s) will cause dismissal"
         })
-
-    if defect_data['remedies']:
-        for remedy in defect_data['remedies']:
-            summary['next_actions'].append({
-                'action': remedy['remedy'],
-                'urgency': remedy['priority'],
-                'details': 'Procedural compliance action'
+        for d in unique_fatals[:2]:
+            strategic_recommendations.append({
+                'priority': 'URGENT',
+                'recommendation': _s(d.get('remedy', d.get('cure', 'Remediate defect'))),
+                'rationale': _s(d.get('defect'))
             })
-
-    if (risk_data.get('overall_risk_score') or 0) >= 80:
-        summary['overall_assessment'] = "STRONG CASE with excellent compliance across all parameters. " \
-                                        "Proceed with confidence."
-    elif (risk_data.get('overall_risk_score') or 0) >= 60:
-        summary['overall_assessment'] = "MODERATE CASE with some weaknesses but generally compliant. " \
-                                        "Address identified gaps to strengthen position."
-    elif (risk_data.get('overall_risk_score') or 0) >= 40:
-        summary['overall_assessment'] = "WEAK CASE with significant risks. " \
-                                        "Serious consideration should be given to settlement or strengthening evidence."
+    elif score >= 70:
+        strategic_recommendations.append({
+            'priority': 'HIGH',
+            'recommendation': 'File complaint — case is in strong position',
+            'rationale': f"Risk score {score}/100 indicates solid compliance"
+        })
+        if settlement_data.get('interim_compensation_eligible'):
+            strategic_recommendations.append({
+                'priority': 'HIGH',
+                'recommendation': 'Apply for interim compensation under Section 143A',
+                'rationale': 'Creates financial pressure; recovers 20% of cheque amount upfront'
+            })
     else:
-        summary['overall_assessment'] = "HIGH RISK CASE with critical defects. " \
-                                        "Immediate remedial action required or case likely to fail."
-
-    return summary
-
-
-def generate_audit_trail(
-    case_data: Dict,
-    timeline_data: Dict,
-    ingredient_data: Dict,
-    doc_data: Dict,
-    risk_data: Dict
-) -> Dict:
-
-    audit = {
-        'input_validation': {
-            'validated': True,
-            'timestamp': datetime.now().isoformat(),
-            'input_hash': hashlib.md5(json.dumps(case_data, sort_keys=True).encode()).hexdigest()
-        },
-        'decision_path': [],
-        'deduction_log': [],
-        'weight_application': {},
-        'fatal_defect_analysis': [],
-        'score_breakdown': []
-    }
-
-    audit['decision_path'].append(f"Case type: {case_data.get('case_type')}")
-    audit['decision_path'].append(f"Amount: ₹{case_data.get('cheque_amount', 0):,.2f}")
-    audit['decision_path'].append(f"Timeline risk: {timeline_data.get('limitation_risk', 'Unknown')}")
-
-    if ingredient_data.get('ingredient_details'):
-        for ing in ingredient_data['ingredient_details']:
-            if ing.get('deduction', 0) > 0:
-                audit['deduction_log'].append({
-                    'ingredient': ing['name'],
-                    'reason': ing.get('issues', ['No issues'])[0] if ing.get('issues') else 'Deduction applied',
-                    'deduction': ing['deduction'],
-                    'score_after': ing['score']
-                })
-
-    if timeline_data.get('gap_analysis'):
-        audit['timeline_gap_analysis'] = timeline_data['gap_analysis']
-
-    audit['weight_application'] = {
-        'weights_used': risk_data.get('category_scores', {}),
-        'justification': 'Statutory compliance-based weighted scoring as per NI Act Section 138 requirements'
-    }
-
-    if risk_data.get('fatal_defects'):
-        for defect in risk_data['fatal_defects']:
-            audit['fatal_defect_analysis'].append({
-                'defect': defect.get('defect'),
-                'category': defect.get('category'),
-                'impact': defect.get('impact'),
-                'legal_basis': 'Section 138 NI Act statutory requirements'
+        strategic_recommendations.append({
+            'priority': 'HIGH',
+            'recommendation': 'Strengthen evidence before filing',
+            'rationale': f"Score {score}/100 — multiple gaps increase acquittal risk"
+        })
+        if not case_data.get('written_agreement_exists'):
+            strategic_recommendations.append({
+                'priority': 'MEDIUM',
+                'recommendation': 'Obtain written acknowledgment of debt from accused',
+                'rationale': 'Absence of written agreement is the primary defence weakness'
             })
 
-    for category, data in risk_data.get('category_scores', {}).items():
-        audit['score_breakdown'].append({
-            'category': category,
-            'raw_score': data.get('score', 0),
-            'weight_percent': data.get('weight', 0),
-            'weighted_contribution': data.get('weighted_score', 0),
-            'calculation': f"{data.get('score', 0)} × {data.get('weight', 0)}% = {data.get('weighted_score', 0)}"
-        })
+    # ── Next actions ──
+    next_actions = []
+    for d in unique_fatals[:3]:
+        next_actions.append(f"URGENT: {_s(d.get('remedy', d.get('defect', 'Address defect')))}")
+    if not case_data.get('postal_proof_available'):
+        next_actions.append("Obtain AD card or postal tracking confirmation for notice")
+    if not case_data.get('written_agreement_exists'):
+        next_actions.append("Collect any WhatsApp/email evidence of the transaction")
+    if not next_actions:
+        next_actions.append("Proceed with final legal review before filing")
 
-    return audit
+    # ── Edge case alert ──
+    edge_cases_alert = edge_case_data.get('detected_cases', []) or []
 
-
-def generate_score_explanation(risk_data: Dict) -> Dict:
-
-    explanation = {
-        'final_score': risk_data.get('overall_risk_score', 0),
-        'compliance_level': risk_data.get('compliance_level', 'Unknown'),
-        'calculation_steps': [],
-        'category_contributions': [],
-        'deductions_applied': [],
-        'overrides_applied': []
+    return {
+        'case_overview':             case_overview,
+        'filing_verdict':            filing_verdict,
+        'overall_assessment':        assessment,
+        'risk_score':                f"{score}/100",
+        'compliance_level':          compliance,
+        'fatal_defects_count':       len(unique_fatals),
+        'strengths':                 strengths[:6],
+        'weaknesses':                weaknesses[:6],
+        'critical_risks':            critical_risks[:6],
+        'strategic_recommendations': strategic_recommendations[:5],
+        'next_actions':              next_actions[:5],
+        'limitation_status':         limitation_status,
+        'processing_time':           'See response root',
+        'edge_cases_alert':          edge_cases_alert[:3],
+        'generated_by':              'JUDIQ Intelligence Engine',
     }
-
-    explanation['calculation_steps'].append("Step 1: Calculate category scores")
-
-    total_weighted = 0
-    for category, data in risk_data.get('category_scores', {}).items():
-        score = data.get('score', 0)
-        weight = data.get('weight', 0) / 100
-        weighted = data.get('weighted_score', 0)
-        total_weighted += weighted
-
-        explanation['category_contributions'].append({
-            'category': category,
-            'score': f"{score:.1f}/100",
-            'weight': f"{weight*100:.0f}%",
-            'contribution': f"{weighted:.2f}",
-            'formula': f"{score:.1f} × {weight:.2f} = {weighted:.2f}"
-        })
-
-        explanation['calculation_steps'].append(
-            f"  {category}: {score:.1f} × {weight:.2f} = {weighted:.2f}"
-        )
-
-    explanation['calculation_steps'].append(f"Step 2: Sum weighted scores = {total_weighted:.2f}")
-
-    if risk_data.get('fatal_defect_override'):
-        override = risk_data['fatal_defect_override']
-        explanation['overrides_applied'].append({
-            'type': 'Fatal Defect Override',
-            'original_score': override.get('original_score', 0),
-            'final_score': override.get('overridden_score', 0),
-            'reason': override.get('reason', 'Fatal defects detected')
-        })
-        explanation['calculation_steps'].append(
-            f"Step 3: Fatal override applied: {override.get('original_score', 0):.1f} → {override.get('overridden_score', 0):.1f}"
-        )
-
-    explanation['calculation_steps'].append(f"FINAL SCORE: {explanation['final_score']:.1f}/100")
-
-    return explanation
 
 
 def generate_verdict_one_liner(
@@ -8221,17 +8086,454 @@ def generate_filing_readiness_checklist(
 
 
 
+
+def _safe(value, default="Not available", fmt=None):
+    """Return value safely, replacing None/empty with default. Optionally format numbers."""
+    if value is None or value == "" or value == {} or value == []:
+        return default
+    if fmt == "inr" and isinstance(value, (int, float)):
+        return f"₹{indian_number_format(value)}"
+    if fmt == "score" and isinstance(value, (int, float)):
+        return f"{value:.1f}/100"
+    if fmt == "pct" and isinstance(value, (int, float)):
+        return f"{value:.1f}%"
+    return str(value)
+
+def _safe(val, fallback="Not available"):
+    """Return val if truthy and not None, else fallback."""
+    if val is None or val == "" or val == [] or val == {}:
+        return fallback
+    return val
+
+
+def _safe_score(val, fallback=0.0):
+    """Return numeric score safely."""
+    try:
+        return round(float(val), 1)
+    except (TypeError, ValueError):
+        return fallback
+
+
 def generate_clean_professional_report(analysis: Dict, case_data: Dict) -> Dict:
 
-    risk = analysis.get('modules', {}).get('risk_assessment', {})
-    timeline = analysis.get('modules', {}).get('timeline_intelligence', {})
-    ingredients = analysis.get('modules', {}).get('ingredient_compliance', {})
-    documentary = analysis.get('modules', {}).get('documentary_strength', {})
-    liability = analysis.get('modules', {}).get('liability_analysis', {})
+    risk        = analysis.get('modules', {}).get('risk_assessment', {}) or {}
+    timeline    = analysis.get('modules', {}).get('timeline_intelligence', {}) or {}
+    ingredients = analysis.get('modules', {}).get('ingredient_compliance', {}) or {}
+    documentary = analysis.get('modules', {}).get('documentary_strength', {}) or {}
+    liability   = analysis.get('modules', {}).get('liability_analysis', {}) or {}
+    defence_m   = analysis.get('modules', {}).get('defence_matrix', {}) or {}
+    defects_m   = analysis.get('modules', {}).get('procedural_defects', {}) or {}
+    cross_exam  = analysis.get('modules', {}).get('cross_examination_risk', {}) or {}
+    judicial    = analysis.get('modules', {}).get('judicial_behavior', {}) or {}
+    settlement  = analysis.get('modules', {}).get('settlement_analysis', {}) or {}
 
-    score = risk.get('overall_risk_score', 0)
-    fatal_flag = analysis.get('fatal_flag', False)
-    fatal_defects = risk.get('fatal_defects', [])
+    score       = _safe_score(risk.get('overall_risk_score'))
+    fatal_flag  = analysis.get('fatal_flag', False)
+
+    # Collect ALL fatal defects from ALL modules
+    all_fatal_defects = []
+    all_fatal_defects.extend(risk.get('fatal_defects', []))
+    all_fatal_defects.extend(defects_m.get('fatal_defects', []))
+    all_fatal_defects.extend(ingredients.get('fatal_defects', []))
+
+    # Deduplicate by defect text
+    seen_defects = set()
+    unique_fatals = []
+    for d in all_fatal_defects:
+        key = d.get('defect', str(d))
+        if key not in seen_defects:
+            seen_defects.add(key)
+            unique_fatals.append(d)
+    fatal_defects = unique_fatals
+
+    amount = case_data.get('cheque_amount', 0)
+    case_type = "Complainant" if case_data.get('case_type') == 'complainant' else "Accused"
+
+    # ── SECTION 0: CASE OVERVIEW ──────────────────────────────────
+    case_overview = {
+        'title': 'CASE OVERVIEW',
+        'case_reference': _safe(analysis.get('case_id')),
+        'analysis_date': analysis.get('analysis_timestamp', '')[:10] or 'Not available',
+        'case_type': case_type,
+        'cheque_amount': f"₹{indian_number_format(amount)}",
+        'cheque_number': _safe(case_data.get('cheque_number')),
+        'cheque_date': _safe(case_data.get('cheque_date')),
+        'bank_name': _safe(case_data.get('bank_name')),
+        'dishonour_date': _safe(case_data.get('dishonour_date')),
+        'dishonour_reason': _safe(case_data.get('dishonour_reason')),
+        'notice_date': _safe(case_data.get('notice_date')),
+        'notice_received_date': _safe(case_data.get('notice_received_date')),
+        'complaint_filed_date': _safe(case_data.get('complaint_filed_date')),
+        'court_location': _safe(case_data.get('court_location')),
+        'debt_nature': _safe(case_data.get('debt_nature')),
+    }
+
+    # ── SECTION 1: EXECUTIVE SUMMARY ─────────────────────────────
+    # Determine filing recommendation
+    if fatal_flag and fatal_defects:
+        filing_status = "DO NOT FILE"
+        filing_colour = "RED"
+        one_liner = (
+            f"This {case_type.lower()} case has {len(fatal_defects)} fatal defect(s). "
+            f"Filing is blocked until defects are remedied. Risk score: {score}/100."
+        )
+        recommended_action = "Address all fatal defects listed below before filing. Consult litigation counsel urgently."
+    elif score >= 75:
+        filing_status = "READY TO FILE"
+        filing_colour = "GREEN"
+        one_liner = f"Case is in a strong position to file. Risk score: {score}/100. Address minor gaps before proceeding."
+        recommended_action = "Proceed with filing after addressing the gaps noted below."
+    elif score >= 55:
+        filing_status = "FILE WITH CAUTION"
+        filing_colour = "AMBER"
+        one_liner = f"Case is maintainable but has significant evidentiary gaps. Risk score: {score}/100."
+        recommended_action = "Strengthen documentary evidence before filing to reduce acquittal risk."
+    else:
+        filing_status = "HIGH RISK — REMEDIATION REQUIRED"
+        filing_colour = "RED"
+        one_liner = f"Multiple compliance gaps detected. Risk score: {score}/100. Filing not advisable without remediation."
+        recommended_action = "Obtain missing documents, strengthen transaction proof, then reassess."
+
+    # Strengths — from category scores
+    strengths = []
+    for cat, data in (risk.get('category_scores') or {}).items():
+        s = _safe_score(data.get('score') if isinstance(data, dict) else data)
+        if s >= 75:
+            strengths.append(f"{cat}: {s}/100 — Strong")
+    if case_data.get('return_memo_available'):
+        strengths.append("Dishonour memo available — primary evidence secured")
+    if case_data.get('postal_proof_available'):
+        strengths.append("Postal proof of notice available — service established")
+    if case_data.get('original_cheque_available'):
+        strengths.append("Original cheque available — foundational document present")
+    if not strengths:
+        strengths.append("Core cheque transaction established")
+
+    # Weaknesses — from category scores + missing docs
+    weaknesses = []
+    for cat, data in (risk.get('category_scores') or {}).items():
+        s = _safe_score(data.get('score') if isinstance(data, dict) else data)
+        if s < 60:
+            reason = data.get('reason', '') if isinstance(data, dict) else ''
+            weaknesses.append(f"{cat}: {s}/100 — {_safe(reason, 'Needs strengthening')}")
+    if not case_data.get('written_agreement_exists'):
+        weaknesses.append("No written agreement — accused can challenge legally enforceable debt")
+    if not case_data.get('ledger_available'):
+        weaknesses.append("No ledger/account records — transaction trail incomplete")
+    if not weaknesses:
+        weaknesses.append("No critical weaknesses detected at this stage")
+
+    # Fatal defect summary for executive section
+    fatal_summary = []
+    for d in fatal_defects[:5]:
+        fatal_summary.append({
+            'defect': _safe(d.get('defect')),
+            'severity': _safe(d.get('severity')),
+            'impact': _safe(d.get('impact')),
+            'remedy': _safe(d.get('remedy', d.get('cure', 'Consult legal counsel')))
+        })
+
+    executive_summary = {
+        'title': 'EXECUTIVE SUMMARY',
+        'one_line_verdict': one_liner,
+        'filing_status': filing_status,
+        'filing_colour': filing_colour,
+        'risk_score': f"{score}/100",
+        'compliance_level': _safe(risk.get('compliance_level'), 'Under Review'),
+        'fatal_defects_count': len(fatal_defects),
+        'fatal_defects': fatal_summary,
+        'strengths': strengths[:5],
+        'weaknesses': weaknesses[:5],
+        'recommended_action': recommended_action,
+        'processing_time': f"{_safe_score(analysis.get('processing_time_seconds'))}s",
+        'engine_version': analysis.get('engine_version', 'v10.0'),
+        'generated_by': 'JUDIQ Legal Intelligence Engine',
+    }
+
+    # ── SECTION 2: TIMELINE (chronological order) ─────────────────
+    chart = sorted(
+        [e for e in timeline.get('timeline_chart', []) if e.get('date')],
+        key=lambda x: x.get('date', '9999')
+    )
+    timeline_section = {
+        'title': 'TIMELINE ANALYSIS',
+        'limitation_risk': _safe(timeline.get('limitation_risk'), 'Not assessed'),
+        'limitation_status': _safe(
+            timeline.get('compliance_status', {}).get('limitation'), 'Not assessed'
+        ),
+        'chronological_events': [
+            {
+                'date': e.get('date', 'Unknown'),
+                'event': _safe(e.get('event')),
+                'status': _safe(e.get('status'), '—')
+            }
+            for e in chart
+        ],
+        'critical_dates': timeline.get('critical_dates', {}),
+        'edge_cases': timeline.get('edge_cases_detected', [])[:3],
+        'risk_markers': [
+            {
+                'issue': _safe(r.get('issue')),
+                'severity': _safe(r.get('severity')),
+                'impact': _safe(r.get('impact'))
+            }
+            for r in timeline.get('risk_markers', [])
+        ]
+    }
+
+    # ── SECTION 3: RISK SCORE BREAKDOWN ──────────────────────────
+    cat_scores = risk.get('category_scores', {})
+    breakdown = []
+    weight_map = {
+        'Timeline Compliance':   ('25%', 'Limitation period, notice timing, complaint filing'),
+        'Ingredient Compliance': ('30%', 'All 7 statutory ingredients of Section 138'),
+        'Documentary Strength':  ('20%', 'Cheque, memo, notice, agreement, ledger'),
+        'Procedural Compliance': ('10%', 'Proper parties, averments, jurisdiction'),
+        'Liability Expansion':   ('15%', 'Section 141 director liability (company cases)'),
+    }
+    for cat, data in cat_scores.items():
+        s = _safe_score(data.get('score') if isinstance(data, dict) else data)
+        weight, desc = weight_map.get(cat, ('—', 'Contributing factor'))
+        status = 'Strong' if s >= 75 else ('Adequate' if s >= 55 else 'Weak')
+        breakdown.append({
+            'category': cat,
+            'score': f"{s}/100",
+            'weight': weight,
+            'status': status,
+            'description': desc,
+            'deductions': data.get('deductions', []) if isinstance(data, dict) else []
+        })
+
+    risk_breakdown = {
+        'title': 'RISK SCORE BREAKDOWN',
+        'overall_score': f"{score}/100",
+        'compliance_level': _safe(risk.get('compliance_level'), 'Under Review'),
+        'fatal_override_active': fatal_flag,
+        'fatal_override_note': (
+            f"Score capped at {score} due to {len(fatal_defects)} fatal defect(s)"
+            if fatal_flag else "No fatal override applied"
+        ),
+        'category_breakdown': breakdown,
+        'scoring_note': (
+            'Score starts at 100. Deductions applied per severity: '
+            'CRITICAL (-20 to -30), MAJOR (-10 to -15), MINOR (-5). '
+            'Fatal defects cap the score regardless of other factors.'
+        )
+    }
+
+    # ── SECTION 4: DOCUMENTARY EVIDENCE ──────────────────────────
+    doc_items = [
+        ('Original Cheque',      case_data.get('original_cheque_available'),   'Primary instrument — essential'),
+        ('Return Memo',          case_data.get('return_memo_available'),        'Proof of dishonour — essential'),
+        ('Postal Proof',         case_data.get('postal_proof_available'),       'Notice service evidence — critical'),
+        ('Written Agreement',    case_data.get('written_agreement_exists'),     'Debt proof — important'),
+        ('Ledger/Account Records', case_data.get('ledger_available'),           'Transaction trail — important'),
+        ('Email/SMS Evidence',   case_data.get('email_sms_evidence'),           'Supporting evidence'),
+        ('Witness Available',    case_data.get('witness_available'),            'Testimonial evidence'),
+    ]
+    doc_section = {
+        'title': 'DOCUMENTARY EVIDENCE ASSESSMENT',
+        'overall_strength': f"{_safe_score(documentary.get('overall_strength_score'))}/100",
+        'strength_label': _safe(documentary.get('strength_label'), 'Under Review'),
+        'documents': [
+            {
+                'document': name,
+                'status': '✅ Available' if available else '❌ Missing',
+                'importance': importance
+            }
+            for name, available, importance in doc_items
+        ],
+        'missing_critical': [
+            name for name, available, imp in doc_items
+            if not available and 'essential' in imp
+        ],
+        'score_explanation': (
+            f"Documentary strength is {_safe_score(documentary.get('overall_strength_score'))}/100. "
+            + ("Written agreement and ledger are missing — without these, the accused can challenge "
+               "the existence of legally enforceable debt, which is a fundamental Section 138 ingredient."
+               if not case_data.get('written_agreement_exists') else
+               "Documentary evidence is in reasonable order.")
+        )
+    }
+
+    # ── SECTION 5: DEFENCE ANALYSIS ──────────────────────────────
+    high_risk = defence_m.get('high_risk_defences', [])
+    all_defences = defence_m.get('defences', defence_m.get('defence_angles', []))
+
+    # Ensure premature complaint appears if applicable
+    proc_fatals = defects_m.get('fatal_defects', [])
+    premature = next((d for d in proc_fatals if 'Premature' in d.get('defect', '') or '15-Day' in d.get('defect', '')), None)
+    if premature and not any('Premature' in str(d) for d in high_risk):
+        high_risk.insert(0, {
+            'defence': 'Premature Complaint — Cause of Action Not Yet Arisen',
+            'strength': 'FATAL',
+            'legal_basis': 'Section 138(b) NI Act',
+            'probability': 'CERTAIN',
+            'strategy': 'File discharge application at first hearing',
+        })
+
+    defence_section = {
+        'title': 'DEFENCE ANALYSIS',
+        'overall_exposure': _safe(defence_m.get('overall_exposure', defence_m.get('exposure_level')), 'Not assessed'),
+        'high_risk_defences': [
+            {
+                'defence': _safe(d.get('defence', d.get('ground'))),
+                'strength': _safe(d.get('strength', d.get('risk_impact'))),
+                'legal_basis': _safe(d.get('legal_basis', d.get('counter', 'Statutory provision'))),
+                'strategy': _safe(d.get('strategy')),
+            }
+            for d in high_risk[:5]
+        ] if high_risk else [{
+            'defence': 'No major defences identified',
+            'strength': 'LOW',
+            'legal_basis': 'Case documents appear adequate',
+            'strategy': 'Maintain current evidence posture'
+        }],
+        'preparation_priorities': defence_m.get('preparation_priorities', [])[:5]
+    }
+
+    # ── SECTION 6: PROCEDURAL DEFECTS ────────────────────────────
+    procedural_section = {
+        'title': 'PROCEDURAL DEFECTS',
+        'overall_risk': _safe(defects_m.get('overall_risk'), 'Not assessed'),
+        'fatal_defects': [
+            {
+                'defect': _safe(d.get('defect')),
+                'severity': _safe(d.get('severity')),
+                'impact': _safe(d.get('impact')),
+                'remedy': _safe(d.get('remedy', d.get('cure', 'Consult legal counsel')))
+            }
+            for d in defects_m.get('fatal_defects', [])
+        ],
+        'curable_defects': [
+            {
+                'defect': _safe(d.get('defect')),
+                'severity': _safe(d.get('severity')),
+                'cure': _safe(d.get('cure'))
+            }
+            for d in defects_m.get('curable_defects', [])
+        ],
+        'warnings': [
+            {'area': _safe(w.get('area')), 'warning': _safe(w.get('warning'))}
+            for w in defects_m.get('warnings', [])
+        ]
+    }
+
+    # ── SECTION 7: JUDICIAL BEHAVIOUR ────────────────────────────
+    jb_confidence = judicial.get('confidence', 'LOW')
+    jb_indices = judicial.get('behavioral_indices', {})
+    if jb_confidence in ('HIGH', 'MEDIUM') and jb_indices:
+        judicial_section = {
+            'title': 'JUDICIAL BEHAVIOUR ANALYSIS',
+            'court': _safe(judicial.get('court_identified'), case_data.get('court_location', 'Not specified')),
+            'confidence': jb_confidence,
+            'sample_size': judicial.get('sample_size', 0),
+            'behavioral_indices': {
+                k: v for k, v in jb_indices.items() if v not in (None, '', 'N/A')
+            },
+            'observed_patterns': judicial.get('observed_patterns', [])[:3],
+            'strategic_insights': judicial.get('strategic_insights', [])[:3],
+        }
+    else:
+        judicial_section = {
+            'title': 'JUDICIAL BEHAVIOUR ANALYSIS',
+            'court': _safe(case_data.get('court_location'), 'Not specified'),
+            'confidence': 'INSUFFICIENT DATA',
+            'note': (
+                'Judicial behaviour analysis is unavailable — '
+                'insufficient case data for this court in the knowledge base. '
+                'Analysis will improve as more judgments are added.'
+            )
+        }
+
+    # ── SECTION 8: CROSS-EXAMINATION RISK ────────────────────────
+    vuln_zones = cross_exam.get('vulnerability_zones', [])
+    likely_qs  = cross_exam.get('likely_questions', [])
+    cx_section = {
+        'title': 'CROSS-EXAMINATION RISK',
+        'overall_risk': _safe(cross_exam.get('overall_cross_exam_risk'), 'Not assessed'),
+        'vulnerability_zones': [
+            {
+                'zone': _safe(z.get('zone', z.get('area'))),
+                'risk': _safe(z.get('risk_level', z.get('severity'))),
+                'likely_question': _safe(z.get('likely_question', z.get('question')))
+            }
+            for z in vuln_zones[:5]
+        ] if vuln_zones else [],
+        'likely_questions': likely_qs[:8] if likely_qs else [
+            'Can you produce the original loan agreement in writing?',
+            'How was the money transferred — cash, cheque, or bank transfer?',
+            'Is it not true the cheque was given as security and not towards repayment?',
+            'Why is there no ledger entry or bank record of this transaction?',
+            'Who was present when the loan was given?',
+        ] if not case_data.get('written_agreement_exists') else [
+            'Please produce the original written agreement.',
+            'When exactly was the notice served — produce postal acknowledgment.',
+        ],
+        'preparation_tips': cross_exam.get('preparation_required', [])[:3]
+    }
+
+    # ── SECTION 9: CONCLUSIONS & ACTIONS ─────────────────────────
+    immediate_actions = []
+    if fatal_defects:
+        for d in fatal_defects[:3]:
+            immediate_actions.append(f"URGENT: {d.get('remedy', d.get('defect', 'Address fatal defect'))}")
+    if not case_data.get('written_agreement_exists'):
+        immediate_actions.append("Obtain written acknowledgment of debt from accused")
+    if not case_data.get('postal_proof_available'):
+        immediate_actions.append("Secure AD card or postal tracking proof of notice")
+    if not immediate_actions:
+        immediate_actions.append("Proceed with filing after final legal review")
+
+    conclusions = {
+        'title': 'CONCLUSIONS & RECOMMENDED ACTIONS',
+        'filing_status': filing_status,
+        'overall_score': f"{score}/100",
+        'one_line_verdict': one_liner,
+        'recommended_action': recommended_action,
+        'immediate_actions': immediate_actions[:5],
+        'disclaimer': (
+            'This report is a structured statutory compliance assessment. '
+            'It does not constitute legal advice. All findings must be reviewed '
+            'by qualified legal counsel before filing or making legal decisions. '
+            'JUDIQ AI accepts no liability for decisions based on this report.'
+        )
+    }
+
+    return {
+        'report_format': 'Structured Professional Brief',
+        'report_version': '2.0',
+        'table_of_contents': [
+            {'section': '0', 'title': 'Case Overview',            'key': 'section_0_case_overview'},
+            {'section': '1', 'title': 'Executive Summary',        'key': 'section_1_executive_summary'},
+            {'section': '2', 'title': 'Timeline Analysis',        'key': 'section_2_timeline'},
+            {'section': '3', 'title': 'Risk Score Breakdown',     'key': 'section_3_risk_breakdown'},
+            {'section': '4', 'title': 'Documentary Evidence',     'key': 'section_4_documentary'},
+            {'section': '5', 'title': 'Defence Analysis',         'key': 'section_5_defence'},
+            {'section': '6', 'title': 'Procedural Defects',       'key': 'section_6_procedural_defects'},
+            {'section': '7', 'title': 'Judicial Behaviour',       'key': 'section_7_judicial_behaviour'},
+            {'section': '8', 'title': 'Cross-Examination Risk',   'key': 'section_8_cross_examination'},
+            {'section': '9', 'title': 'Conclusions & Actions',    'key': 'section_9_conclusions'},
+        ],
+        'section_0_case_overview':    case_overview,
+        'section_1_executive_summary': executive_summary,
+        'section_2_timeline':          timeline_section,
+        'section_3_risk_breakdown':    risk_breakdown,
+        'section_4_documentary':       doc_section,
+        'section_5_defence':           defence_section,
+        'section_6_procedural_defects': procedural_section,
+        'section_7_judicial_behaviour': judicial_section,
+        'section_8_cross_examination':  cx_section,
+        'section_9_conclusions':        conclusions,
+        'metadata': {
+            'engine': 'JUDIQ Intelligence Engine',
+            'analysis_id': _safe(analysis.get('case_id')),
+            'generated': analysis.get('analysis_timestamp', '')[:19],
+            'processing_time': f"{_safe_score(analysis.get('processing_time_seconds'))}s",
+            'fatal_defects_total': len(fatal_defects),
+            'modules_executed': len(analysis.get('modules', {})),
+        }
+    }
 
     page_1 = {
         'title': 'EXECUTIVE OVERVIEW',
@@ -8445,21 +8747,361 @@ def generate_clean_professional_report(analysis: Dict, case_data: Dict) -> Dict:
 
 
 def generate_executive_report(analysis_data: Dict) -> Dict:
+    """
+    Generate a fully-populated executive report.
+    All fields have safe fallbacks — no null/undefined values.
+    """
+    modules      = analysis_data.get('modules', {})
+    exec_summ    = analysis_data.get('executive_summary', {})
+    plain_summ   = analysis_data.get('plain_summary', {})
+    risk_data    = modules.get('risk_assessment', {})
+    timeline_data= modules.get('timeline_intelligence', {})
+    doc_data     = modules.get('documentary_strength', {})
+    defence_data = modules.get('defence_risk_analysis', {})
+    defect_data  = modules.get('document_compliance', {})
+    ingredient_data = modules.get('ingredient_compliance', {})
+    settlement_data = modules.get('settlement_analysis', {})
+    cross_data   = modules.get('cross_examination_risk', {})
+    judicial_data= modules.get('judicial_behavior', {})
 
+    score        = risk_data.get('overall_risk_score', 0)
+    fatal_flag   = analysis_data.get('fatal_flag', False)
+    fatal_defects= risk_data.get('fatal_defects', [])
+    cat_scores   = risk_data.get('category_scores', {})
+    limitation_risk = timeline_data.get('limitation_risk', 'Unknown')
+    case_meta    = analysis_data.get('case_metadata', {})
+    proc_time    = analysis_data.get('processing_time_seconds', 0)
+
+    # ── Executive Summary (auto-generated if missing) ──────────
+    one_liner = plain_summ.get('one_line_verdict') or exec_summ.get('case_overview') or (
+        f"{'⛔ FATAL DEFECT — Do not file.' if fatal_flag else ('✅ Strong case.' if score >= 75 else ('⚠️ Moderate case — evidence gaps.' if score >= 60 else '🔴 Weak case — major remediation required.'))}"
+        f" Risk score: {score:.0f}/100."
+    )
+
+    strengths = (
+        plain_summ.get('strengths') or
+        exec_summ.get('strengths') or
+        ["Cheque dishonour established", "Notice served on accused"]
+    )
+    weaknesses = (
+        plain_summ.get('weaknesses') or
+        exec_summ.get('weaknesses') or
+        ["Documentary evidence needs strengthening"]
+    )
+    recommendation = (
+        plain_summ.get('recommendation') or
+        exec_summ.get('strategic_recommendations', [{}])[0].get('recommendation', '') or
+        ("Do not file — address fatal defect first." if fatal_flag else
+         "Strengthen documentary evidence before filing." if score < 70 else
+         "Ready to file. Obtain final legal review.")
+    )
+
+    # ── Chronological timeline events ──────────────────────────
+    raw_chart = timeline_data.get('timeline_chart', [])
+    timeline_events = sorted(
+        [e for e in raw_chart if e.get('date')],
+        key=lambda x: x.get('date', '9999')
+    )
+    if not timeline_events:
+        # Build from critical_dates if chart is empty
+        cd = timeline_data.get('critical_dates', {})
+        for label, date_key in [
+            ("Cheque Date",         "cheque_date"),
+            ("Dishonour Date",      "dishonour_date"),
+            ("Notice Sent",         "notice_date"),
+            ("Cause of Action",     "fifteen_day_expiry"),
+            ("Complaint Filed",     "complaint_filed_date"),
+            ("Limitation Deadline", "limitation_deadline"),
+        ]:
+            if cd.get(date_key):
+                status = timeline_data.get('compliance_status', {}).get(date_key, '—')
+                timeline_events.append({
+                    'date': cd[date_key], 'event': label, 'status': _safe(status, '—')
+                })
+
+    # ── Risk breakdown ──────────────────────────────────────────
+    risk_breakdown = []
+    for cat, data in cat_scores.items():
+        risk_breakdown.append({
+            'category': cat,
+            'score': f"{_safe(data.get('score'), 0, 'pct')}",
+            'weight': f"{data.get('weight', 0)*100:.0f}% of total",
+            'status': _safe(data.get('status'), 'Under review'),
+            'reason': _safe(data.get('reason') or data.get('primary_issue'), 'No issues detected')
+        })
+
+    # ── Documentary gaps explained ──────────────────────────────
+    doc_gaps = []
+    doc_details = doc_data.get('document_details', {})
+    for doc_name, doc_info in doc_details.items():
+        if isinstance(doc_info, dict) and doc_info.get('grade') in ['WEAK','VERY WEAK','MISSING','NOT AVAILABLE']:
+            doc_gaps.append({
+                'document': doc_name,
+                'status': _safe(doc_info.get('grade'), 'Missing'),
+                'impact': _safe(doc_info.get('impact'), 'Reduces evidential strength'),
+                'remedy': _safe(doc_info.get('remedy'), 'Obtain and verify document')
+            })
+    if not doc_gaps and doc_data.get('overall_strength_score', 100) < 70:
+        for field, label in [
+            ('written_agreement_exists', 'Written Loan/Transaction Agreement'),
+            ('ledger_available',         'Ledger / Account Records'),
+            ('original_cheque_available','Original Cheque'),
+            ('return_memo_available',    'Bank Dishonour Memo'),
+            ('postal_proof_available',   'Postal Proof of Notice'),
+        ]:
+            if not case_meta.get(field, True):
+                doc_gaps.append({
+                    'document': label,
+                    'status': 'Not available',
+                    'impact': 'Defence can challenge existence of debt / notice service',
+                    'remedy': 'Obtain before filing'
+                })
+
+    # ── Defence analysis ────────────────────────────────────────
+    high_risk_defences = defence_data.get('high_risk_defences', [])
+    fatal_defences     = defence_data.get('fatal_defences', [])
+
+    # Premature complaint = automatic strong defence
+    limitation_status = timeline_data.get('compliance_status', {}).get('limitation', '')
+    if 'PREMATURE' in str(limitation_status).upper() and not any(
+        'premature' in str(d).lower() for d in high_risk_defences
+    ):
+        high_risk_defences = [{
+            'ground': 'Premature Complaint — Cause of Action Not Yet Arisen',
+            'strength': 'FATAL',
+            'legal_basis': 'Section 138 NI Act — complaint maintainable only after 15-day payment period expires',
+            'impact': 'Accused will succeed in getting complaint dismissed'
+        }] + list(high_risk_defences)
+
+    # ── Cross-examination questions ─────────────────────────────
+    cross_questions = cross_data.get('likely_questions', [])
+    vuln_zones = cross_data.get('vulnerability_zones', [])
+    if not cross_questions:
+        # Generate from weaknesses
+        cross_questions = []
+        if not case_meta.get('written_agreement_exists'):
+            cross_questions.append("Is it correct that there is no written agreement evidencing the alleged loan?")
+        if not case_meta.get('ledger_available'):
+            cross_questions.append("Can you produce any ledger entry or bank record showing the transfer of funds?")
+        if 'PREMATURE' in str(limitation_status).upper():
+            cross_questions.append("Was the complaint filed before the 15-day payment period under Section 138 had expired?")
+        if not case_meta.get('postal_proof_available'):
+            cross_questions.append("Do you have an Acknowledgment Due (AD) card proving the accused received the notice?")
+        cross_questions.append("On what date exactly was the cheque amount allegedly given to the accused, and in what form?")
+
+    # ── Judicial behaviour ──────────────────────────────────────
+    jud_confidence = judicial_data.get('confidence', 'LOW')
+    jud_indices    = judicial_data.get('behavioral_indices', {})
+    jud_section = (
+        {
+            'court': _safe(judicial_data.get('court_identified'), 'Not specified'),
+            'confidence': jud_confidence,
+            'limitation_strictness': _safe(jud_indices.get('limitation_strictness'), 'Insufficient data'),
+            'settlement_friendly':   _safe(jud_indices.get('settlement_friendly'),   'Insufficient data'),
+            'patterns': judicial_data.get('observed_patterns', []),
+            'note': (
+                'Judicial behaviour analysis unavailable — insufficient court-specific data in knowledge base.'
+                if jud_confidence == 'LOW' else
+                f"Based on {_safe(judicial_data.get('sample_size'), 'limited')} cases from this court."
+            )
+        }
+    )
+
+    report = {
+        "header": {
+            "platform": "JUDIQ AI — Legal Intelligence Platform",
+            "report_type": "Section 138 NI Act — Litigation Intelligence Report",
+            "classification": "CONFIDENTIAL — ATTORNEY-CLIENT PRIVILEGED"
+        },
+
+        "document_info": {
+            "title": "SECTION 138 NI ACT — LITIGATION INTELLIGENCE REPORT",
+            "case_id": _safe(analysis_data.get('case_id'), 'N/A'),
+            "date": datetime.now().strftime("%d %B %Y"),
+            "processing_time": f"{proc_time:.2f}s" if proc_time else "< 1s",
+            "engine_version": _safe(analysis_data.get('engine_version'), 'v10.0')
+        },
+
+        # ── PAGE 1: CASE OVERVIEW ──────────────────────────────
+        "page_1_case_overview": {
+            "title": "CASE OVERVIEW",
+            "case_type":       _safe(case_meta.get('case_type'), 'Not specified').upper(),
+            "cheque_amount":   _safe(case_meta.get('cheque_amount'), 0, 'inr'),
+            "cheque_number":   _safe(case_meta.get('cheque_number'), 'Not provided'),
+            "bank_name":       _safe(case_meta.get('bank_name'), 'Not provided'),
+            "dishonour_reason":_safe(case_meta.get('dishonour_reason'), 'Not specified'),
+            "court_location":  _safe(case_meta.get('court_location'), 'Not specified'),
+            "debt_nature":     _safe(case_meta.get('debt_nature'), 'Not specified'),
+            "overall_score":   f"{score:.1f}/100",
+            "risk_classification": _safe(risk_data.get('compliance_level'), 'Under Review'),
+            "fatal_defects_present": "YES — DO NOT FILE" if fatal_flag else "None detected"
+        },
+
+        # ── PAGE 2: EXECUTIVE SUMMARY ──────────────────────────
+        "page_2_executive_summary": {
+            "title": "EXECUTIVE SUMMARY",
+            "one_line_verdict": one_liner,
+            "case_strength":    _safe(risk_data.get('compliance_level'), 'Under Review'),
+            "risk_score":       f"{score:.1f}/100",
+            "fatal_flag":       fatal_flag,
+            "fatal_count":      len(fatal_defects),
+            "fatal_defects":    [
+                {
+                    "defect":  _safe(d.get('defect'),  'Procedural violation'),
+                    "impact":  _safe(d.get('impact'),  'Filing risk'),
+                    "action":  _safe(d.get('action') or d.get('remedy'), 'Consult counsel')
+                }
+                for d in (fatal_defects + defect_data.get('fatal_defects', []))[:5]
+            ],
+            "strengths":    [_safe(s) for s in strengths[:5]],
+            "weaknesses":   [_safe(w) for w in weaknesses[:5]],
+            "recommendation": recommendation,
+            "limitation_status": _safe(
+                timeline_data.get('compliance_status', {}).get('limitation'),
+                'Not assessed'
+            )
+        },
+
+        # ── PAGE 3: TIMELINE (CHRONOLOGICAL) ──────────────────
+        "page_3_timeline": {
+            "title": "TIMELINE ANALYSIS (CHRONOLOGICAL)",
+            "limitation_risk": _safe(limitation_risk, 'Unknown'),
+            "events": timeline_events,
+            "critical_dates": {
+                k: _safe(v, 'Not provided')
+                for k, v in timeline_data.get('critical_dates', {}).items()
+            },
+            "compliance_status": {
+                k: _safe(v, 'Not assessed')
+                for k, v in timeline_data.get('compliance_status', {}).items()
+            },
+            "edge_cases": timeline_data.get('edge_cases_detected', [])
+        },
+
+        # ── PAGE 4: RISK BREAKDOWN ─────────────────────────────
+        "page_4_risk_breakdown": {
+            "title": "RISK SCORE BREAKDOWN",
+            "overall_score": f"{score:.1f}/100",
+            "scoring_method": "Weighted deductions from 100 base — fatal defects cap score at 15",
+            "breakdown": risk_breakdown,
+            "fatal_override_applied": fatal_flag,
+            "score_cap_reason": (
+                _safe(fatal_defects[0].get('defect'), 'Fatal condition') if fatal_flag else "No cap applied"
+            )
+        },
+
+        # ── PAGE 5: DOCUMENTARY EVIDENCE ──────────────────────
+        "page_5_documentary_evidence": {
+            "title": "DOCUMENTARY EVIDENCE ANALYSIS",
+            "overall_strength": f"{doc_data.get('overall_strength_score', 0):.1f}/100",
+            "strength_grade": _safe(doc_data.get('strength_grade'), 'Under review'),
+            "gaps_identified": doc_gaps,
+            "gaps_count": len(doc_gaps),
+            "impact_summary": (
+                "Strong documentary foundation" if doc_data.get('overall_strength_score', 0) >= 70 else
+                f"{len(doc_gaps)} document gap(s) identified — defence can exploit missing records"
+            )
+        },
+
+        # ── PAGE 6: DEFENCE ANALYSIS ──────────────────────────
+        "page_6_defence_analysis": {
+            "title": "DEFENCE EXPOSURE ANALYSIS",
+            "overall_risk": _safe(defence_data.get('overall_risk'), 'Under review'),
+            "fatal_defences": [
+                {
+                    'ground':      _safe(d.get('ground'),      'Fatal defence'),
+                    'strength':    _safe(d.get('strength'),    'FATAL'),
+                    'legal_basis': _safe(d.get('legal_basis'), 'Statutory violation'),
+                    'impact':      _safe(d.get('viability_impact') or d.get('impact'), 'Case may be dismissed')
+                }
+                for d in fatal_defences[:3]
+            ],
+            "high_risk_defences": [
+                {
+                    'ground':  _safe(d.get('ground'),  'Defence argument'),
+                    'strength':_safe(d.get('strength'),'HIGH'),
+                    'counter': _safe(d.get('counter_strategy') or d.get('counter'), 'Obtain documentary proof')
+                }
+                for d in high_risk_defences[:5]
+            ],
+            "no_defence_note": (
+                None if (fatal_defences or high_risk_defences) else
+                "Note: No specific defences detected by module — however verify for procedural defects manually"
+            )
+        },
+
+        # ── PAGE 7: CROSS-EXAMINATION ─────────────────────────
+        "page_7_cross_examination": {
+            "title": "CROSS-EXAMINATION RISK ANALYSIS",
+            "vulnerability_zones": [
+                {
+                    'zone':   _safe(v.get('zone'),   'Evidentiary gap'),
+                    'risk':   _safe(v.get('risk_level'), 'HIGH'),
+                    'detail': _safe(v.get('detail'),  'Witness may be challenged')
+                }
+                for v in vuln_zones[:5]
+            ],
+            "likely_questions": [_safe(q) for q in cross_questions[:8]],
+            "preparation_advice": _safe(
+                cross_data.get('preparation_summary'),
+                "Prepare witnesses for questions on transaction basis, notice receipt, and document authenticity."
+            )
+        },
+
+        # ── PAGE 8: JUDICIAL BEHAVIOUR ────────────────────────
+        "page_8_judicial_behaviour": {
+            "title": "JUDICIAL BEHAVIOUR ANALYSIS",
+            "analysis": jud_section,
+            "strategic_insights": judicial_data.get('strategic_insights', []),
+        },
+
+        # ── PAGE 9: SETTLEMENT INTELLIGENCE ──────────────────
+        "page_9_settlement": {
+            "title": "SETTLEMENT & FINANCIAL EXPOSURE",
+            "settlement_recommended": settlement_data.get('settlement_recommended', False),
+            "settlement_range": settlement_data.get('recommended_settlement_range', {}),
+            "financial_exposure": settlement_data.get('financial_exposure', {}),
+            "strategy": _safe(settlement_data.get('settlement_strategy'), 'Evaluate based on case strength')
+        },
+
+        # ── PAGE 10: CONCLUSIONS ──────────────────────────────
+        "page_10_conclusions": {
+            "title": "CONCLUSIONS & RECOMMENDED ACTIONS",
+            "verdict": one_liner,
+            "immediate_actions": exec_summ.get('next_actions', []) or (
+                ["Address fatal defect before filing", "Consult litigation counsel urgently"]
+                if fatal_flag else
+                ["Strengthen documentary evidence", "Verify notice service proof", "File within limitation period"]
+            ),
+            "strategic_recommendations": exec_summ.get('strategic_recommendations', []),
+            "disclaimer": (
+                "This analysis is a structured compliance assessment based on information provided. "
+                "It does NOT constitute legal advice or legal representation. "
+                "All findings must be reviewed by qualified legal counsel before filing."
+            )
+        },
+
+        "footer": {
+            "prepared_by": "JUDIQ AI Intelligence Engine v10.0",
+            "generated_at": datetime.now().strftime("%d %B %Y, %H:%M"),
+            "processing_time": f"{proc_time:.2f}s" if proc_time else "< 1s",
+            "classification": "CONFIDENTIAL — FOR AUTHORIZED USE ONLY",
+            "disclaimer": "NOT LEGAL ADVICE — Consult qualified legal counsel before acting on this report."
+        }
+    }
+
+    return report
+
+
+def generate_executive_report_legacy(analysis_data: Dict) -> Dict:
+    """Legacy version kept for backward compatibility."""
     executive_summary = analysis_data.get('executive_summary', {})
     risk_data = analysis_data['modules'].get('risk_assessment', {})
     timeline_data = analysis_data['modules'].get('timeline_intelligence', {})
 
     report = {
         "header": {
-            "company": "JUDIQ AI",
-            "tagline": "Legal Intelligence Platform",
-            "contact": {
-                "phone": "+123-456-7890",
-                "email": "hello@judiq.ai",
-                "address": "123 Anywhere St., Any City"
-            },
-            "logo": "scales_of_justice"
+            "platform": "JUDIQ AI — Legal Intelligence Platform",
         },
 
         "document_info": {
@@ -8572,7 +9214,7 @@ def generate_detailed_report(analysis_data: Dict) -> Dict:
             "contact": {
                 "phone": "+123-456-7890",
                 "email": "hello@judiq.ai",
-                "address": "123 Anywhere St., Any City"
+                "platform": "JUDIQ AI"
             }
         },
 
@@ -9124,16 +9766,19 @@ def generate_plain_summary(analysis: Dict, case_data: Dict) -> Dict:
         )
 
     return {
-        'one_line_verdict': one_line,
-        'perspective': perspective,
-        'cheque_amount': f"₹{indian_number_format(amount)}",
+        'one_line_verdict': one_line or 'Analysis complete — see details below',
+        'perspective': perspective or 'Not specified',
+        'cheque_amount': f"₹{indian_number_format(amount)}" if amount else 'Not specified',
         'risk_score': f"{score:.1f}/100",
-        'case_classification': compliance,
-        'strengths': strengths,
-        'weaknesses': weaknesses,
-        'recommendation': recommendation,
+        'case_classification': compliance or 'Under Review',
+        'strengths': strengths or ['Analysis complete'],
+        'weaknesses': weaknesses or ['Review full analysis for details'],
+        'recommendation': recommendation or 'Consult legal counsel',
         'fatal_flag': fatal_flag,
-        'limitation_status': timeline.get('compliance_status', {}).get('limitation', 'Not assessed'),
+        'fatal_defects_count': len(analysis.get('modules', {}).get('risk_assessment', {}).get('fatal_defects', []) +
+                                    analysis.get('modules', {}).get('procedural_defects', {}).get('fatal_defects', [])),
+        'limitation_status': timeline.get('compliance_status', {}).get('limitation') or 'Not assessed',
+        'processing_time': f"{analysis.get('processing_time_seconds', 0)}s",
     }
 
 @asynccontextmanager
@@ -9524,6 +10169,17 @@ def enforce_verdict_integrity(analysis_report: Dict) -> Dict:
     if 'executive_summary' in analysis_report:
         if isinstance(analysis_report['executive_summary'], dict):
             analysis_report['executive_summary']['overall_assessment'] = final_verdict['category']
+            # Sync fatal state into executive_summary
+            if analysis_report.get('fatal_flag'):
+                analysis_report['executive_summary']['filing_verdict'] = (
+                    analysis_report['executive_summary'].get('filing_verdict') or
+                    'DO NOT FILE — FATAL DEFECTS PRESENT'
+                )
+                analysis_report['executive_summary']['fatal_defects_count'] = max(
+                    analysis_report['executive_summary'].get('fatal_defects_count', 0),
+                    len(analysis_report.get('modules', {}).get('procedural_defects', {}).get('fatal_defects', [])) +
+                    len(analysis_report.get('modules', {}).get('risk_assessment', {}).get('fatal_defects', []))
+                )
             # Update case overview to reflect final truth
             status_marker = '🔴' if final_verdict['status'] == 'FATAL' else ('⚠️' if final_verdict['status'] in ['CRITICAL', 'WEAK'] else '✅')
             analysis_report['executive_summary']['case_overview'] = f"{status_marker} {final_verdict['status']}: {final_verdict['reasoning']}"
@@ -9767,6 +10423,7 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
 
             fatal_messages = [f"{f['type']}: {f['details']}" for f in fatal_conditions]
 
+            _elapsed = round(time.time() - start_time, 2) if 'start_time' in dir() else 0
             return {
                 'case_id': case_id,
                 'fatal_flag': True,
@@ -9778,6 +10435,7 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
                 'fatal_type': 'MULTIPLE_FATAL_CONDITIONS',
                 'execution_stopped_at': 'PHASE_1',
                 'fatal_details': fatal_messages,
+                'processing_time_seconds': _elapsed,
                 'modules': {
                     'timeline_intelligence': timeline_result,
                     'document_compliance': doc_compliance,
@@ -9829,6 +10487,30 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
 
         logger.info("  Module 5: Defence Analysis...")
         defence_result = analyze_defence_vulnerabilities(case_data, ingredient_result, doc_result)
+
+        # ── Inject procedural defences that the defence module may miss ──
+        # Check premature complaint BEFORE defect module runs
+        if case_data.get('notice_received_date') and case_data.get('complaint_filed_date'):
+            try:
+                from datetime import datetime as _dt
+                nr = _dt.strptime(case_data['notice_received_date'], '%Y-%m-%d')
+                cf = _dt.strptime(case_data['complaint_filed_date'], '%Y-%m-%d')
+                if cf < nr + timedelta(days=15):
+                    premature_defence = {
+                        'defence': 'Premature Complaint — Cause of Action Not Arisen',
+                        'strength': 'FATAL',
+                        'legal_basis': 'Section 138(b): Complaint only maintainable after 15-day payment period expires',
+                        'probability': 'CERTAIN',
+                        'strategy': 'File discharge application — complaint is not maintainable',
+                        'risk_impact': 'FATAL — Complaint must be dismissed'
+                    }
+                    if 'high_risk_defences' not in defence_result:
+                        defence_result['high_risk_defences'] = []
+                    defence_result['high_risk_defences'].insert(0, premature_defence)
+                    defence_result['premature_complaint_defence'] = True
+            except Exception:
+                pass
+
         analysis_report['modules']['defence_matrix'] = defence_result
         analysis_report['architecture']['deterministic_modules'].append('Defence Vulnerability')
 
@@ -9836,6 +10518,13 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         defect_result = scan_procedural_defects(case_data, timeline_result, liability_result)
         analysis_report['modules']['procedural_defects'] = defect_result
         analysis_report['architecture']['deterministic_modules'].append('Procedural Defects')
+
+        # ── FATAL PROPAGATION: procedural fatal defects → global fatal_flag ──
+        proc_fatal = defect_result.get('fatal_defects', [])
+        if proc_fatal:
+            analysis_report['fatal_flag'] = True
+            analysis_report['fatal_source'] = analysis_report.get('fatal_source', '') + ',procedural_defects'
+            logger.warning(f"🔴 FATAL PROCEDURAL DEFECT: {proc_fatal[0].get('defect', 'Unknown')}")
 
         logger.info("  Module 7: Risk Scoring...")
         risk_result = calculate_overall_risk_score(
@@ -10181,6 +10870,7 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         }
 
         analysis_report['processing_time_seconds'] = round(time.time() - start_time, 2)
+        analysis_report['processing_time_ms'] = round((time.time() - start_time) * 1000)
 
         logger.info(f"✅ Analysis complete in {analysis_report['processing_time_seconds']}s")
         logger.info(f"   Deterministic Modules: {len(analysis_report['architecture']['deterministic_modules'])}")
@@ -10736,12 +11426,15 @@ async def analyze_case(request: CaseAnalysisRequest, http_request: Request = Non
         return {
             "success": True,
             "case_id": analysis['case_id'],
-            "plain_summary": plain_summary,          # ← short human-readable summary (top level)
-            "analysis": analysis,                    # ← full detailed analysis
+            # ── Quick read (lawyers read these first) ──────────────────
+            "plain_summary":     plain_summary,
+            "executive_summary": analysis.get('executive_summary', {}),
+            "report":            analysis.get('professional_report', {}),
+            # ── Full detail ────────────────────────────────────────────
+            "analysis": analysis,
             "api_response_time_ms": round((time.time() - start) * 1000, 1),
             "engine_version": ENGINE_VERSION,
             "maturity_grade": "Production Stable",
-            "stability_level": "v1.0"
         }
 
     except Exception as e:
