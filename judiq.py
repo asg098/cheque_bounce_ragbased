@@ -175,13 +175,21 @@ def format_timeline_transparency(timeline_data: Dict) -> Dict:
                 days_from_coa = (complaint - cause_of_action).days
 
                 if complaint < cause_of_action:
-                    # Filed before cause of action arose — premature, legally fatal
+                    # Strictly premature — filed before cause of action
                     days_premature = (cause_of_action - complaint).days
                     transparent_timeline['compliance_display']['complaint'] = {
                         'status': '❌ PREMATURE FILING',
                         'details': f'Filed {days_premature} days BEFORE cause of action arose',
                         'cause_of_action_date': cause_of_action.isoformat(),
                         'impact': 'Fatal — complaint filed before 15-day payment period expired'
+                    }
+                elif complaint == cause_of_action:
+                    # Same-day filing — borderline / legally risky
+                    transparent_timeline['compliance_display']['complaint'] = {
+                        'status': '⚠️ SAME-DAY FILING — BORDERLINE RISK',
+                        'details': 'Complaint filed on exact date cause of action arose',
+                        'cause_of_action_date': cause_of_action.isoformat(),
+                        'impact': 'Some courts require filing strictly AFTER cause of action — risk of dismissal'
                     }
                 elif complaint <= complaint_deadline:
                     transparent_timeline['compliance_display']['complaint'] = {
@@ -1424,6 +1432,11 @@ def validate_case_input(case_data: Dict) -> Tuple[bool, List[str]]:
                 errors.append(
                     f"⚠️ FATAL: Complaint filed {days_premature} days BEFORE cause of action "
                     f"(cause of action arises on {cause_of_action} — 15 days after notice service)"
+                )
+            elif parsed_dates['complaint_filed_date'] == cause_of_action:
+                errors.append(
+                    f"⚠️ WARNING: Complaint filed on same day as cause of action ({cause_of_action}). "
+                    f"Some courts treat this as premature — borderline legal risk."
                 )
             elif parsed_dates['complaint_filed_date'] > complaint_deadline:
                 complaint_gap = (parsed_dates['complaint_filed_date'] - cause_of_action).days
@@ -3669,7 +3682,7 @@ def analyze_timeline(case_data: Dict) -> Dict:
             days_to_complaint = (complaint_filed_date - cause_of_action).days
 
             if complaint_filed_date < cause_of_action:
-                # ── PREMATURE FILING: complaint before 15-day payment period expired ──
+                # ── STRICTLY PREMATURE: filed before cause of action ──
                 days_premature = (cause_of_action - complaint_filed_date).days
                 timeline_analysis['compliance_status']['limitation'] = (
                     f'❌ PREMATURE FILING — complaint filed {days_premature} days before '
@@ -3688,6 +3701,33 @@ def analyze_timeline(case_data: Dict) -> Dict:
                     'impact': 'Premature complaint — cause of action had not yet arisen under Section 138',
                     'legal_basis': 'Section 138 NI Act: complaint maintainable only after 15-day payment period expires',
                     'action': 'File fresh complaint after cause of action arises (if still within limitation)'
+                })
+
+            elif complaint_filed_date == cause_of_action:
+                # ── SAME-DAY FILING: borderline / legally risky ──
+                timeline_analysis['compliance_status']['limitation'] = (
+                    f'⚠️ SAME-DAY FILING — complaint filed on exact date of cause of action '
+                    f'({cause_of_action.strftime("%Y-%m-%d")}). High dismissal risk.'
+                )
+                timeline_analysis['limitation_risk'] = 'HIGH'
+                timeline_analysis['score'] = 40   # borderline — not fatal but risky
+                timeline_analysis['timeline_chart'].append({
+                    'date': complaint_filed_date.strftime('%Y-%m-%d'),
+                    'event': f'Complaint Filed — SAME DAY AS CAUSE OF ACTION ⚠️',
+                    'status': '⚠️'
+                })
+                timeline_analysis['risk_markers'].append({
+                    'severity': 'HIGH',
+                    'issue': 'Complaint filed on same day as cause of action',
+                    'impact': 'Some courts hold complaint not maintainable on same day — depends on judicial interpretation',
+                    'legal_basis': 'Section 138: cause of action arises when 15-day period expires; filing on same day is legally grey',
+                    'action': 'High risk — recommend refiling after cause of action date if within limitation'
+                })
+                timeline_analysis['edge_cases_detected'].append({
+                    'case': 'Same-Day Filing',
+                    'risk': 'HIGH',
+                    'rule': 'Courts are split: some require filing strictly AFTER cause of action, not on the same day',
+                    'recommendation': 'File fresh complaint next day if still within 30-day limitation window'
                 })
 
             elif complaint_filed_date <= limitation_deadline:
@@ -3954,7 +3994,13 @@ def analyze_ingredients(case_data: Dict, timeline_data: Dict) -> Dict:
 
     limitation_status_str = timeline_data.get('compliance_status', {}).get('limitation', '')
 
-    if 'PREMATURE' in limitation_status_str.upper():
+    if 'SAME-DAY' in limitation_status_str.upper() or 'SAME DAY' in limitation_status_str.upper():
+        # Same-day filing — borderline, not automatically fatal in ingredient check
+        ing7_score = 50
+        ing7_issues.append('Complaint filed on same day as cause of action — borderline legal risk')
+        _ing7_status = '⚠️ BORDERLINE (Same-Day)'
+
+    elif 'PREMATURE' in limitation_status_str.upper():
         # Premature filing — complaint filed BEFORE cause of action arose
         # This is a separate defect from time-barred (which is filing TOO LATE)
         ing7_score = 0
@@ -5428,11 +5474,42 @@ def scan_procedural_defects(case_data: Dict, timeline_data: Dict, liability_data
             fifteen_day_expiry = notice_recv + timedelta(days=15)
 
             if complaint_filed < fifteen_day_expiry:
+                # Strictly premature — filed before cause of action
                 defect_scan['fatal_defects'].append({
                     'defect': 'Complaint Filed Before 15-Day Period Expired',
                     'severity': 'CRITICAL',
-                    'impact': 'Premature complaint - cause of action not yet arisen',
-                    'remedy': 'NONE - Complaint will be dismissed. Must file fresh complaint after 15 days expire.'
+                    'impact': 'Premature complaint — cause of action had not yet arisen under Section 138',
+                    'remedy': 'NONE — Complaint will be dismissed. Must file fresh complaint after 15-day period expires.'
+                })
+            elif complaint_filed == fifteen_day_expiry:
+                # Same-day filing — borderline defect, not automatically fatal but high risk
+                defect_scan['curable_defects'].append({
+                    'defect': 'Complaint Filed on Same Day as Cause of Action',
+                    'severity': 'HIGH',
+                    'impact': (
+                        'Borderline procedural risk — complaint filed on the exact day the 15-day '
+                        'payment period expired. Some courts hold this premature; others accept it. '
+                        'Depends on whether cause of action arises at start or end of the day.'
+                    ),
+                    'cure': (
+                        'If still within 30-day limitation window, file fresh complaint on the next day. '
+                        'If not, apply for condonation citing bonafide belief. '
+                        'Prepare arguments that cause of action arose at midnight on '
+                        + fifteen_day_expiry.strftime("%Y-%m-%d") + '.'
+                    ),
+                    'legal_basis': (
+                        'Section 138 NI Act: cause of action arises when payment period expires. '
+                        'Courts are split on whether filing on the same day is maintainable. '
+                        'Safe approach: file one day after.'
+                    )
+                })
+                defect_scan['warnings'].append({
+                    'area': 'Same-Day Filing Risk',
+                    'warning': (
+                        'Complaint filed on same date as cause of action. '
+                        'This is legally risky — some courts may treat this as premature.'
+                    ),
+                    'check': 'Verify court interpretation and consider refiling next day if within limitation.'
                 })
         except:
             pass
