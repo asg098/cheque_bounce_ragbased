@@ -10395,6 +10395,71 @@ def enforce_verdict_integrity(analysis_report: Dict) -> Dict:
     return analysis_report
 
 
+
+def generate_audit_trail(case_data: Dict, timeline_result: Dict, ingredient_result: Dict,
+                         doc_result: Dict, risk_result: Dict) -> Dict:
+    """Generate a structured audit trail of the analysis."""
+    return {
+        'case_type':           case_data.get('case_type', 'unknown'),
+        'cheque_amount':       case_data.get('cheque_amount', 0),
+        'analysis_inputs': {
+            'cheque_date':         case_data.get('cheque_date'),
+            'dishonour_date':      case_data.get('dishonour_date'),
+            'notice_date':         case_data.get('notice_date'),
+            'complaint_filed_date':case_data.get('complaint_filed_date'),
+            'court_location':      case_data.get('court_location'),
+        },
+        'module_scores': {
+            'timeline_limitation_risk': timeline_result.get('limitation_risk', 'Unknown'),
+            'ingredient_compliance':    round(ingredient_result.get('overall_compliance', 0), 1),
+            'documentary_strength':     round(doc_result.get('overall_strength_score', 0), 1),
+            'overall_risk_score':       round((risk_result.get('overall_risk_score') or 0), 1),
+        },
+        'fatal_defects_count': len(risk_result.get('fatal_defects', [])),
+        'audit_version': 'v1.0',
+        'locked': True,
+    }
+
+
+def generate_score_explanation(risk_result: Dict) -> Dict:
+    """Generate human-readable explanation for each score component."""
+    if not isinstance(risk_result, dict):
+        return {'error': 'Risk result unavailable'}
+
+    cat_scores = risk_result.get('category_scores') or {}
+    explanations = {}
+
+    desc_map = {
+        'Timeline Compliance':   'Measures whether key dates (notice, complaint) fall within statutory deadlines.',
+        'Ingredient Compliance': 'Evaluates all 7 statutory ingredients required under Section 138 NI Act.',
+        'Documentary Strength':  'Assesses quality and completeness of supporting documents.',
+        'Procedural Compliance': 'Checks adherence to procedural requirements (jurisdiction, averments, etc.).',
+        'Liability Expansion':   'Evaluates Section 141 liability for company cases and director impleading.',
+    }
+
+    for cat, data in cat_scores.items():
+        score = (data.get('score') if isinstance(data, dict) else data) or 0
+        try:
+            score = float(score)
+        except (TypeError, ValueError):
+            score = 0.0
+        level = 'Strong' if score >= 75 else ('Adequate' if score >= 55 else 'Weak')
+        explanations[cat] = {
+            'score':       round(score, 1),
+            'level':       level,
+            'description': desc_map.get(cat, 'Contributing factor to overall risk score.'),
+            'weight':      (data.get('weight', 0) if isinstance(data, dict) else 0),
+        }
+
+    return {
+        'category_explanations': explanations,
+        'overall_score':         round((risk_result.get('overall_risk_score') or 0), 1),
+        'compliance_level':      risk_result.get('compliance_level', 'Under Review'),
+        'fatal_override':        len(risk_result.get('fatal_defects', [])) > 0,
+        'methodology':           'Weighted severity-based deduction from 100. CRITICAL: -20 to -30, MAJOR: -10 to -15, MINOR: -5.',
+    }
+
+
 def perform_comprehensive_analysis(case_data: Dict) -> Dict:
 
     analysis_start_time = datetime.now()
