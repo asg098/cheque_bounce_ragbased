@@ -10485,6 +10485,19 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
                 'status': 'INVALID',
                 'overall_status': 'ANALYSIS FAILED',
                 'risk_score': 0,
+                '_result': {
+                    'overall_score': 0, 'overall_score_display': '0.0/100',
+                    'is_fatal': True, 'fatal_defects_count': 0,
+                    'filing_status': 'ANALYSIS INCOMPLETE — see error',
+                    'processing_time': '0s', 'processing_time_seconds': 0,
+                    'documentary_gaps': [], 'cross_exam_questions': [],
+                    'next_actions': [{'action': 'Resubmit case data', 'urgency': 'URGENT', 'details': 'Analysis could not complete'}],
+                    'presumption_stage': 'Not assessed', 'burden_position': 'Not assessed',
+                    'court_name': 'Not specified', 'court_confidence': 'Insufficient data',
+                    'court_note': 'Analysis incomplete', 'capped_at': 0,
+                    'capped_at_display': '0/100', 'original_score': 0,
+                    'fatal_override_note': 'Analysis did not complete',
+                },
                 'engine_version': ENGINE_VERSION,
                 'analysis_timestamp': analysis_start_time.isoformat()
             }
@@ -10494,6 +10507,7 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
             # Fatal detected - logging removed for stability
             analysis_report['fatal_flag'] = True
             analysis_report['fatal_source'] = 'timeline_intelligence'
+            _tl_r = timeline_result
             return {
                 'case_id': case_id,
                 'fatal_flag': True,
@@ -10504,6 +10518,21 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
                 'filing_blocked': True,
                 'fatal_type': 'LIMITATION_EXPIRED',
                 'execution_stopped_at': 'PHASE_1',
+                '_result': {
+                    'overall_score': 0, 'overall_score_display': '0.0/100',
+                    'is_fatal': True, 'fatal_defects_count': 1,
+                    'filing_status': 'DO NOT FILE — LIMITATION EXPIRED',
+                    'processing_time': '0s', 'processing_time_seconds': 0,
+                    'limitation_risk': str(_tl_r.get('limitation_risk', 'CRITICAL')),
+                    'limitation_status': str((_tl_r.get('compliance_status') or {}).get('limitation', 'Time-barred')),
+                    'documentary_gaps': [], 'cross_exam_questions': [],
+                    'next_actions': [{'action': 'Case is time-barred — cannot file complaint', 'urgency': 'URGENT', 'details': 'Complaint barred by limitation under Section 142 NI Act'}],
+                    'presumption_stage': 'Not assessed', 'burden_position': 'Not assessed',
+                    'court_name': 'Not specified', 'court_confidence': 'Insufficient data',
+                    'court_note': 'Case did not proceed to full analysis',
+                    'capped_at': 0, 'capped_at_display': '0/100',
+                    'original_score': 0, 'fatal_override_note': 'Score capped at 0 — limitation expired',
+                },
                 'modules': {'timeline_intelligence': timeline_result},
                 'no_further_analysis': True,
                 'engine_version': ENGINE_VERSION,
@@ -10611,6 +10640,26 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
                 'execution_stopped_at': 'PHASE_1',
                 'fatal_details': fatal_messages,
                 'processing_time_seconds': _elapsed,
+                '_result': {
+                    'overall_score': FATAL_CAP_UNIFIED,
+                    'overall_score_display': f'{FATAL_CAP_UNIFIED}/100',
+                    'is_fatal': True,
+                    'fatal_defects_count': len(fatal_conditions),
+                    'filing_status': 'DO NOT FILE — FATAL DEFECTS PRESENT',
+                    'processing_time': f'{_elapsed:.2f}s' if _elapsed > 0 else '< 1s',
+                    'processing_time_seconds': _elapsed,
+                    'documentary_gaps': [],
+                    'cross_exam_questions': [],
+                    'next_actions': [{'action': m, 'urgency': 'URGENT', 'details': 'Fatal condition — filing blocked'} for m in fatal_messages[:3]],
+                    'presumption_stage': 'Not assessed', 'burden_position': 'Not assessed',
+                    'court_name': str(case_data.get('court_location', 'Not specified')),
+                    'court_confidence': 'Insufficient data',
+                    'court_note': 'Case did not proceed to full analysis',
+                    'capped_at': FATAL_CAP_UNIFIED,
+                    'capped_at_display': f'{FATAL_CAP_UNIFIED}/100',
+                    'original_score': 0,
+                    'fatal_override_note': f'Score capped at {FATAL_CAP_UNIFIED} — {len(fatal_conditions)} fatal condition(s)',
+                },
                 'modules': {
                     'timeline_intelligence': timeline_result,
                     'document_compliance': doc_compliance,
