@@ -10503,41 +10503,13 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
             }
 
         # FATAL CHECKPOINT 1: Timeline
+        # NOTE: We do NOT return early here. We set fatal_flag and CONTINUE
+        # so ALL modules execute and the full report is complete.
         if timeline_result.get('limitation_risk') in ['EXPIRED', 'CRITICAL']:
-            # Fatal detected - logging removed for stability
             analysis_report['fatal_flag'] = True
             analysis_report['fatal_source'] = 'timeline_intelligence'
-            _tl_r = timeline_result
-            return {
-                'case_id': case_id,
-                'fatal_flag': True,
-                'fatal_source': 'timeline_intelligence',
-                'overall_status': 'FATAL - LIMITATION BARRED',
-                'risk_score': 0,
-                'decisive_verdict': 'CASE TIME-BARRED - FILING WILL FAIL',
-                'filing_blocked': True,
-                'fatal_type': 'LIMITATION_EXPIRED',
-                'execution_stopped_at': 'PHASE_1',
-                '_result': {
-                    'overall_score': 0, 'overall_score_display': '0.0/100',
-                    'is_fatal': True, 'fatal_defects_count': 1,
-                    'filing_status': 'DO NOT FILE — LIMITATION EXPIRED',
-                    'processing_time': '0s', 'processing_time_seconds': 0,
-                    'limitation_risk': str(_tl_r.get('limitation_risk', 'CRITICAL')),
-                    'limitation_status': str((_tl_r.get('compliance_status') or {}).get('limitation', 'Time-barred')),
-                    'documentary_gaps': [], 'cross_exam_questions': [],
-                    'next_actions': [{'action': 'Case is time-barred — cannot file complaint', 'urgency': 'URGENT', 'details': 'Complaint barred by limitation under Section 142 NI Act'}],
-                    'presumption_stage': 'Not assessed', 'burden_position': 'Not assessed',
-                    'court_name': 'Not specified', 'court_confidence': 'Insufficient data',
-                    'court_note': 'Case did not proceed to full analysis',
-                    'capped_at': 0, 'capped_at_display': '0/100',
-                    'original_score': 0, 'fatal_override_note': 'Score capped at 0 — limitation expired',
-                },
-                'modules': {'timeline_intelligence': timeline_result},
-                'no_further_analysis': True,
-                'engine_version': ENGINE_VERSION,
-                'analysis_timestamp': analysis_start_time.isoformat()
-            }
+            analysis_report['fatal_type'] = 'LIMITATION_EXPIRED'
+            logger.warning(f"🔴 FATAL TIMELINE: {timeline_result.get('limitation_risk')} — continuing all modules for complete report")
 
         doc_compliance = analyze_document_compliance(case_data)
         analysis_report['modules']['document_compliance'] = doc_compliance
@@ -10620,61 +10592,15 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
                 'details': 'Legal notice requirement not satisfied'
             })
 
-        # If any fatal condition exists, stop and return
+        # If any fatal condition exists — record it but DO NOT stop pipeline
+        # All modules must still run so the report is complete and useful to lawyers
         if len(fatal_conditions) > 0:
             analysis_report['fatal_flag'] = True
             analysis_report['fatal_source'] = ', '.join([f['source'] for f in fatal_conditions])
-
-            fatal_messages = [f"{f['type']}: {f['details']}" for f in fatal_conditions]
-
-            _elapsed = round(time.time() - start_time, 2) if 'start_time' in dir() else 0
-            return {
-                'case_id': case_id,
-                'fatal_flag': True,
-                'fatal_source': analysis_report['fatal_source'],
-                'overall_status': 'FATAL - FILING BLOCKED',
-                'risk_score': FATAL_CAP_UNIFIED,
-                'decisive_verdict': f"FATAL CONDITIONS DETECTED - {len(fatal_conditions)} critical issues",
-                'filing_blocked': True,
-                'fatal_type': 'MULTIPLE_FATAL_CONDITIONS',
-                'execution_stopped_at': 'PHASE_1',
-                'fatal_details': fatal_messages,
-                'processing_time_seconds': _elapsed,
-                '_result': {
-                    'overall_score': FATAL_CAP_UNIFIED,
-                    'overall_score_display': f'{FATAL_CAP_UNIFIED}/100',
-                    'is_fatal': True,
-                    'fatal_defects_count': len(fatal_conditions),
-                    'filing_status': 'DO NOT FILE — FATAL DEFECTS PRESENT',
-                    'processing_time': f'{_elapsed:.2f}s' if _elapsed > 0 else '< 1s',
-                    'processing_time_seconds': _elapsed,
-                    'documentary_gaps': [],
-                    'cross_exam_questions': [],
-                    'next_actions': [{'action': m, 'urgency': 'URGENT', 'details': 'Fatal condition — filing blocked'} for m in fatal_messages[:3]],
-                    'presumption_stage': 'Not assessed', 'burden_position': 'Not assessed',
-                    'court_name': str(case_data.get('court_location', 'Not specified')),
-                    'court_confidence': 'Insufficient data',
-                    'court_note': 'Case did not proceed to full analysis',
-                    'capped_at': FATAL_CAP_UNIFIED,
-                    'capped_at_display': f'{FATAL_CAP_UNIFIED}/100',
-                    'original_score': 0,
-                    'fatal_override_note': f'Score capped at {FATAL_CAP_UNIFIED} — {len(fatal_conditions)} fatal condition(s)',
-                },
-                'modules': {
-                    'timeline_intelligence': timeline_result,
-                    'document_compliance': doc_compliance,
-                    'section_65b_compliance': section_65b,
-                    'income_tax_269ss': income_tax_269ss,
-                    'notice_delivery_status': notice_delivery,
-                    'part_payment_analysis': part_payment,
-                    'territorial_jurisdiction': jurisdiction,
-                    'compounding_analysis': compounding,
-                    'director_role_analysis': director_role
-                },
-                'no_further_analysis': True,
-                'engine_version': ENGINE_VERSION,
-                'analysis_timestamp': analysis_start_time.isoformat()
-            }
+            analysis_report['fatal_type'] = 'MULTIPLE_FATAL_CONDITIONS'
+            analysis_report['fatal_conditions'] = fatal_conditions
+            analysis_report['fatal_details'] = [f"{f['type']}: {f['details']}" for f in fatal_conditions]
+            logger.warning(f"🔴 FATAL CONDITIONS ({len(fatal_conditions)}) — recording but continuing all modules for complete report")
 
         logger.info("✅ PHASE 1 COMPLETE: No fatal conditions - Proceeding to full analysis")
         analysis_report['audit_log']['phase_1_passed'] = True
@@ -10712,6 +10638,30 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         logger.info("  Module 5: Defence Analysis...")
         defence_result = analyze_defence_vulnerabilities(case_data, ingredient_result, doc_result)
 
+        # ── Inject timeline-based defences that the defence module may miss ──
+        _tl_limit = timeline_result.get('compliance_status', {}).get('limitation', '')
+        if 'PREMATURE' in str(_tl_limit).upper() or 'SAME-DAY' in str(_tl_limit).upper():
+            _is_premature = 'PREMATURE' in str(_tl_limit).upper()
+            _defence_entry = {
+                'defence': ('Premature Complaint — Cause of Action Not Yet Arisen'
+                            if _is_premature else
+                            'Same-Day Filing — Borderline Premature Complaint'),
+                'strength': 'FATAL' if _is_premature else 'HIGH',
+                'legal_basis': 'Section 138(b) NI Act — complaint maintainable only after 15-day payment period expires',
+                'probability': 'CERTAIN' if _is_premature else 'HIGH',
+                'strategy': ('File discharge application at first hearing — complaint not maintainable'
+                             if _is_premature else
+                             'Challenge maintainability — filing on same day as cause of action is legally risky'),
+                'source': 'timeline_intelligence'
+            }
+            if 'high_risk_defences' not in defence_result:
+                defence_result['high_risk_defences'] = []
+            # Insert at front if not already present
+            existing_defences = [d.get('defence', '') for d in defence_result['high_risk_defences']]
+            if _defence_entry['defence'] not in existing_defences:
+                defence_result['high_risk_defences'].insert(0, _defence_entry)
+            defence_result['premature_complaint_detected'] = True
+
         # ── Inject procedural defences that the defence module may miss ──
         # Check premature complaint BEFORE defect module runs
         if case_data.get('notice_received_date') and case_data.get('complaint_filed_date'):
@@ -10740,6 +10690,48 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
 
         logger.info("  Module 6: Defect Scanning...")
         defect_result = scan_procedural_defects(case_data, timeline_result, liability_result)
+
+        # ── Propagate ALL timeline risk markers into procedural defects ──
+        for rm in timeline_result.get('risk_markers', []):
+            sev = rm.get('severity', '')
+            defect_text = rm.get('issue', '')
+            # Avoid duplicates
+            existing = [d.get('defect', '') for d in defect_result.get('fatal_defects', []) +
+                        defect_result.get('curable_defects', []) + defect_result.get('warnings', [])]
+            if defect_text and defect_text not in existing:
+                if sev == 'FATAL' or sev == 'CRITICAL':
+                    defect_result.setdefault('fatal_defects', []).append({
+                        'defect': defect_text,
+                        'severity': sev,
+                        'impact': rm.get('impact', 'Fatal procedural defect from timeline'),
+                        'remedy': rm.get('action', 'Consult legal counsel'),
+                        'source': 'timeline_intelligence'
+                    })
+                elif sev == 'HIGH':
+                    defect_result.setdefault('curable_defects', []).append({
+                        'defect': defect_text,
+                        'severity': sev,
+                        'cure': rm.get('action', 'Address before filing'),
+                        'source': 'timeline_intelligence'
+                    })
+                else:
+                    defect_result.setdefault('warnings', []).append({
+                        'area': 'Timeline',
+                        'warning': defect_text,
+                        'check': rm.get('action', 'Verify before filing')
+                    })
+
+        # Recalculate overall_risk after propagation
+        fatal_count = len(defect_result.get('fatal_defects', []))
+        if fatal_count >= 2:
+            defect_result['overall_risk'] = 'CRITICAL - Multiple Fatal Defects'
+        elif fatal_count == 1:
+            defect_result['overall_risk'] = 'HIGH - One Fatal Defect Present'
+        elif defect_result.get('curable_defects'):
+            defect_result['overall_risk'] = 'MEDIUM - Curable Defects Present'
+        else:
+            defect_result['overall_risk'] = 'LOW - No Major Defects Detected'
+
         analysis_report['modules']['procedural_defects'] = defect_result
         analysis_report['architecture']['deterministic_modules'].append('Procedural Defects')
 
@@ -10914,11 +10906,8 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         if len(doc_compliance.get('fatal_defects', [])) > 0:
             analysis_report['fatal_flag'] = True
             analysis_report['overall_status'] = 'FATAL - FILING BLOCKED'
-            analysis_report['risk_score'] = FATAL_CAP_UNIFIED
-            analysis_report['decisive_verdict'] = f"ABSOLUTE FAILURE - {len(doc_compliance['fatal_defects'])} fatal document defects"
             analysis_report['filing_blocked'] = True
-            logger.error("🔴 FATAL DOCUMENTS MISSING - IMMEDIATE STOP")
-            return analysis_report
+            logger.warning("🔴 FATAL DOCUMENT DEFECTS — continuing modules for complete report")
 
         logger.info("⚖️ Module 15: Defence Risk Analysis...")
         defence_risks = analyze_defence_risks(case_data, doc_result)
@@ -10936,31 +10925,23 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         if cross_validation.get('severity') == 'FATAL':
             analysis_report['fatal_flag'] = True
             analysis_report['overall_status'] = 'FATAL - EVIDENCE GAP'
-            analysis_report['risk_score'] = FATAL_CAP_UNIFIED
-            analysis_report['decisive_verdict'] = f"Evidence gap: {cross_validation['gaps_identified'][0]['description']}"
+            analysis_report['fatal_type'] = analysis_report.get('fatal_type', 'EVIDENCE_GAP')
             analysis_report['filing_blocked'] = True
-            logger.error("🔴 FATAL EVIDENCE GAP - DEFENCE NOT COUNTERED")
-            return analysis_report
+            logger.warning("🔴 FATAL EVIDENCE GAP — continuing modules for complete report")
 
         if len(dependency_check.get('violations', [])) > 0:
             has_fatal_dependency = any(v['severity'] == 'FATAL' for v in dependency_check['violations'])
             if has_fatal_dependency:
                 analysis_report['fatal_flag'] = True
                 analysis_report['overall_status'] = 'FATAL - MANDATORY REQUIREMENTS NOT MET'
-                analysis_report['risk_score'] = FATAL_CAP_UNIFIED
-                analysis_report['decisive_verdict'] = f"{dependency_check['violation_count']} mandatory requirements violated"
                 analysis_report['filing_blocked'] = True
-                logger.error("🔴 MANDATORY DEPENDENCY VIOLATIONS - FILING BLOCKED")
-                return analysis_report
+                logger.warning("🔴 MANDATORY DEPENDENCY VIOLATIONS — continuing modules for complete report")
 
         if len(defence_risks.get('fatal_defences', [])) > 0:
             analysis_report['fatal_flag'] = True
             analysis_report['overall_status'] = 'FATAL - CASE VIABILITY COMPROMISED'
-            analysis_report['risk_score'] = FATAL_CAP_UNIFIED
-            analysis_report['decisive_verdict'] = defence_risks.get('case_viability_impact', 'CRITICAL DEFENCE EXPOSURE')
             analysis_report['filing_blocked'] = False
-            logger.error("🔴 FATAL DEFENCE RISKS - HIGH ACQUITTAL PROBABILITY")
-            return analysis_report
+            logger.warning("🔴 FATAL DEFENCE RISKS — continuing modules for complete report")
 
         logger.info("✓ Module 16: Filing Readiness Checklist...")
         filing_readiness = generate_filing_readiness_checklist(
