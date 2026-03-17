@@ -3712,8 +3712,8 @@ def analyze_timeline(case_data: Dict) -> Dict:
                     f'⚠️ SAME-DAY FILING — complaint filed on exact date of cause of action '
                     f'({cause_of_action.strftime("%Y-%m-%d")}). High dismissal risk.'
                 )
-                timeline_analysis['limitation_risk'] = 'HIGH'
-                timeline_analysis['score'] = 40   # borderline — not fatal but risky
+                timeline_analysis['limitation_risk'] = 'CRITICAL'
+                timeline_analysis['score'] = 20   # same-day is high risk, effectively critical — not fatal but risky
                 timeline_analysis['timeline_chart'].append({
                     'date': complaint_filed_date.strftime('%Y-%m-%d'),
                     'event': f'Complaint Filed — SAME DAY AS CAUSE OF ACTION ⚠️',
@@ -3981,12 +3981,17 @@ def analyze_ingredients(case_data: Dict, timeline_data: Dict) -> Dict:
 
     ing6_score = 100
     ing6_issues = []
+    # If complaint was filed before cause of action, ingredient 6 is conditionally incomplete
+    _tl_limit6 = timeline_data.get('compliance_status', {}).get('limitation', '')
+    if 'PREMATURE' in str(_tl_limit6).upper() or 'SAME-DAY' in str(_tl_limit6).upper():
+        ing6_score = 50
+        ing6_issues.append('15-day period had not expired at complaint filing — ingredient conditionally incomplete')
 
     ingredients['ingredient_details'].append({
         'number': 6,
         'name': 'Payment Failed Within 15 Days',
         'score': ing6_score,
-        'status': '✅ Compliant',
+        'status': '✅ Compliant' if ing6_score == 100 else '⚠️ Conditional — filing was premature',
         'issues': ing6_issues,
         'evidence_required': ['Affidavit stating no payment received']
     })
@@ -4926,6 +4931,14 @@ def analyze_documentary_strength(case_data: Dict) -> Dict:
     )
 
     doc_analysis['overall_strength_score'] = round(weighted_score, 1)
+    # Map score → human-readable label
+    _ds = doc_analysis['overall_strength_score']
+    doc_analysis['strength_label'] = (
+        'Strong'   if _ds >= 70 else
+        'Moderate' if _ds >= 45 else
+        'Weak'     if _ds >= 25 else
+        'Very Weak'
+    )
 
     if weighted_score >= 80:
         overall_grade = "STRONG"
@@ -5587,12 +5600,16 @@ def calculate_overall_risk_score(
         elif marker['severity'] == 'HIGH':
             timeline_score -= 20
 
+    # Use timeline module's own score if available (prevents conflict)
+    if timeline_data.get('score') is not None and isinstance(timeline_data.get('score'), (int, float)):
+        tl_module_score = float(timeline_data['score'])
+        timeline_score = tl_module_score if tl_module_score > 0 else timeline_score
     timeline_score = normalize_score(timeline_score)
     timeline_score = cap_score_realistic(timeline_score, max_cap=98.0)
 
     risk_model['category_scores']['Timeline Compliance'] = {
         'score': timeline_score,
-        'weight': int(weights['timeline'] * 100),
+        'weight': weights['timeline'],
         'weighted_score': timeline_score * weights['timeline']
     }
     risk_model['risk_breakdown']['timeline_risk'] = int((100 - timeline_score) * weights['timeline'])
@@ -5601,7 +5618,7 @@ def calculate_overall_risk_score(
     ingredient_score = cap_score_realistic(ingredient_score, max_cap=98.0)
     risk_model['category_scores']['Ingredient Compliance'] = {
         'score': ingredient_score,
-        'weight': int(weights['ingredients'] * 100),
+        'weight': weights['ingredients'],
         'weighted_score': ingredient_score * weights['ingredients']
     }
     risk_model['risk_breakdown']['ingredient_risk'] = int((100 - ingredient_score) * weights['ingredients'])
@@ -5610,7 +5627,7 @@ def calculate_overall_risk_score(
     doc_score = cap_score_realistic(doc_score, max_cap=98.0)
     risk_model['category_scores']['Documentary Strength'] = {
         'score': doc_score,
-        'weight': int(weights['documentary'] * 100),
+        'weight': weights['documentary'],
         'weighted_score': doc_score * weights['documentary']
     }
     risk_model['risk_breakdown']['documentary_risk'] = int((100 - doc_score) * weights['documentary'])
@@ -5624,8 +5641,10 @@ def calculate_overall_risk_score(
     liability_score = cap_score_realistic(liability_score, max_cap=98.0)
     risk_model['category_scores']['Proper Impleading'] = {
         'score': liability_score,
-        'weight': int(weights['liability'] * 100),
-        'weighted_score': liability_score * weights['liability']
+        'weight': weights['liability'],
+        'weighted_score': liability_score * weights['liability'],
+        'reason': 'All required parties are correctly impleaded' if liability_score >= 90 else 'One or more required parties may not be correctly impleaded',
+        'explanation': 'Section 141 NI Act — for company cases, all directors in-charge at time of offence must be named with specific averments'
     }
     risk_model['risk_breakdown']['liability_risk'] = int((100 - liability_score) * weights['liability'])
 
@@ -5642,7 +5661,7 @@ def calculate_overall_risk_score(
     procedural_score = cap_score_realistic(procedural_score, max_cap=98.0)
     risk_model['category_scores']['Procedural Compliance'] = {
         'score': procedural_score,
-        'weight': int(weights['procedural'] * 100),
+        'weight': weights['procedural'],
         'weighted_score': procedural_score * weights['procedural']
     }
     risk_model['risk_breakdown']['procedural_risk'] = int((100 - procedural_score) * weights['procedural'])
@@ -10396,6 +10415,84 @@ def enforce_verdict_integrity(analysis_report: Dict) -> Dict:
 
 
 
+
+def deduplicate_fatal_defects(defects: List[Dict]) -> List[Dict]:
+    """
+    Normalize fatal defects — collapse duplicate premature/limitation defects
+    into a single canonical entry with supporting details.
+    """
+    if not defects:
+        return defects
+
+    PREMATURE_KEYWORDS = [
+        'premature', '15-day', '15 day', 'cause of action', 'before cause',
+        'before 15', 'filed before', 'complaint filed before'
+    ]
+    TIMEBARRED_KEYWORDS = ['time-barred', 'time barred', 'barred by limitation', 'limitation expired']
+    SAMEDDAY_KEYWORDS   = ['same-day', 'same day', 'same date']
+
+    premature_group  = []
+    timebarred_group = []
+    sameday_group    = []
+    other            = []
+
+    for d in defects:
+        text = (d.get('defect','') + ' ' + d.get('impact','') + ' ' + d.get('remedy','')).lower()
+        if any(k in text for k in PREMATURE_KEYWORDS):
+            premature_group.append(d)
+        elif any(k in text for k in TIMEBARRED_KEYWORDS):
+            timebarred_group.append(d)
+        elif any(k in text for k in SAMEDDAY_KEYWORDS):
+            sameday_group.append(d)
+        else:
+            other.append(d)
+
+    result = []
+
+    if premature_group:
+        # Find the most specific one (has days count)
+        best = next((d for d in premature_group if 'days' in d.get('defect','').lower()), premature_group[0])
+        # Collect unique impacts/remedies for supporting detail
+        supporting = '; '.join({d.get('impact','') for d in premature_group if d.get('impact','') and d.get('impact','') != best.get('impact','')})
+        result.append({
+            'defect':    'Premature Complaint — Cause of Action Had Not Yet Arisen',
+            'severity':  'CRITICAL',
+            'impact':    best.get('impact') or 'Complaint is not maintainable under Section 138 NI Act',
+            'remedy':    'File fresh complaint AFTER the 15-day payment period expires. Do NOT refile the same complaint.',
+            'legal_basis': 'Section 138(b) NI Act: complaint maintainable only after 15-day payment period expires',
+            'supporting_detail': supporting or None,
+            'source':    'timeline_intelligence',
+            'is_primary': True,
+        })
+
+    if timebarred_group:
+        best = timebarred_group[0]
+        result.append({
+            'defect':    'Complaint Barred by Limitation',
+            'severity':  'CRITICAL',
+            'impact':    best.get('impact') or 'Complaint filed beyond 1-month limitation period from cause of action',
+            'remedy':    'File condonation application under Section 142 NI Act with sufficient cause. Filing without condonation will be dismissed.',
+            'legal_basis': 'Section 142(b) NI Act: complaint must be filed within one month of cause of action',
+            'source':    'ingredient_compliance',
+            'is_primary': True,
+        })
+
+    if sameday_group:
+        best = sameday_group[0]
+        result.append({
+            'defect':    'Same-Day Filing — Borderline Procedural Risk',
+            'severity':  'HIGH',
+            'impact':    best.get('impact') or 'Courts are split on whether complaint filed on same day as cause of action is maintainable',
+            'remedy':    'Strongly recommend refiling one day after cause of action if still within limitation period.',
+            'legal_basis': 'Section 138(b) NI Act: some courts require filing strictly AFTER cause of action',
+            'source':    'timeline_intelligence',
+            'is_primary': False,
+        })
+
+    result.extend(other)
+    return result
+
+
 def generate_audit_trail(case_data: Dict, timeline_result: Dict, ingredient_result: Dict,
                          doc_result: Dict, risk_result: Dict) -> Dict:
     """Generate a structured audit trail of the analysis."""
@@ -11249,6 +11346,7 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
                 _k = _fd.get('defect', str(_fd))
                 if _k not in _seen_f:
                     _seen_f.add(_k); _uniq_f.append(_fd)
+            _uniq_f = deduplicate_fatal_defects(_uniq_f)
     
             # Category scores — guaranteed numeric
             _cat = _risk.get('category_scores', {}) or {}
