@@ -2210,14 +2210,17 @@ class AuditTrail:
         return self.trail
 
 def safe_module_execution(module_func, *args, **kwargs) -> Dict:
-
+    import traceback as _tb
     try:
         return module_func(*args, **kwargs)
     except Exception as e:
+        _trace = _tb.format_exc()
         logger.error(f"❌ Module {module_func.__name__} failed: {e}")
+        logger.error(f"Traceback:\n{_trace}")
         return {
             'error': True,
             'error_message': str(e),
+            'error_traceback': _trace,
             'module': module_func.__name__,
             'fallback_score': 50.0
         }
@@ -10609,12 +10612,20 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         analysis_report['audit_log']['phases_executed'].append('PHASE_2_FULL_ANALYSIS')
 
         logger.info("  Module 2: Ingredient Analysis...")
-        ingredient_result = analyze_ingredients(case_data, timeline_result)
+        try:
+            ingredient_result = analyze_ingredients(case_data, timeline_result)
+        except Exception as _e:
+            logger.error(f'❌ Module failed: {_e}')
+            ingredient_result = {'overall_compliance': 0, 'risk_level': 'Error', 'ingredient_details': [], 'fatal_defects': [], 'critical_count': 0}
         analysis_report['modules']['ingredient_compliance'] = ingredient_result
         analysis_report['architecture']['deterministic_modules'].append('Ingredient Compliance')
 
         logger.info("  Module 3: Documentary Analysis...")
-        doc_result = analyze_documentary_strength(case_data)
+        try:
+            doc_result = analyze_documentary_strength(case_data)
+        except Exception as _e:
+            logger.error(f'❌ Module failed: {_e}')
+            doc_result = {'overall_strength_score': 0, 'strength_label': 'Error', 'fatal_defects': []}
         analysis_report['modules']['documentary_strength'] = doc_result
         analysis_report['architecture']['deterministic_modules'].append('Documentary Strength')
 
@@ -10631,12 +10642,18 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         analysis_report['architecture']['deterministic_modules'].append('Financial Capacity')
 
         logger.info("  Module 4: Liability Analysis...")
-        liability_result = analyze_accused_liability(case_data)
+        try:
+            liability_result = analyze_accused_liability(case_data)
+        except Exception as _e:
+            logger.error(f'❌ Module failed: {_e}')
+            liability_result = {'liability_score': 0, 'parties_properly_impleaded': False}
         analysis_report['modules']['liability_analysis'] = liability_result
         analysis_report['architecture']['deterministic_modules'].append('Liability Expansion')
 
         logger.info("  Module 5: Defence Analysis...")
         defence_result = analyze_defence_vulnerabilities(case_data, ingredient_result, doc_result)
+        if not isinstance(defence_result, dict):
+            defence_result = {}
 
         # ── Inject timeline-based defences that the defence module may miss ──
         _tl_limit = timeline_result.get('compliance_status', {}).get('limitation', '')
@@ -10657,7 +10674,7 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
             if 'high_risk_defences' not in defence_result:
                 defence_result['high_risk_defences'] = []
             # Insert at front if not already present
-            existing_defences = [d.get('defence', '') for d in defence_result['high_risk_defences']]
+            existing_defences = [d.get('defence', '') for d in (defence_result.get('high_risk_defences') or [])]
             if _defence_entry['defence'] not in existing_defences:
                 defence_result['high_risk_defences'].insert(0, _defence_entry)
             defence_result['premature_complaint_detected'] = True
@@ -10690,6 +10707,8 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
 
         logger.info("  Module 6: Defect Scanning...")
         defect_result = scan_procedural_defects(case_data, timeline_result, liability_result)
+        if not isinstance(defect_result, dict):
+            defect_result = {'overall_risk': 'Not assessed', 'fatal_defects': [], 'curable_defects': [], 'warnings': []}
 
         # ── Propagate ALL timeline risk markers into procedural defects ──
         for rm in timeline_result.get('risk_markers', []):
@@ -10756,7 +10775,7 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
             logger.error(f"risk_result is not a dict: {type(risk_result)}")
             risk_result = {'overall_risk_score': 0, 'category_scores': {}, 'fatal_defects': []}
 
-        if 'overall_risk_score' not in risk_result or risk_result['overall_risk_score'] is None:
+        if not isinstance(risk_result, dict) or 'overall_risk_score' not in risk_result or risk_result['overall_risk_score'] is None:
             logger.error("risk_result missing or None overall_risk_score - setting to 0")
             risk_result['overall_risk_score'] = 0
 
@@ -10818,22 +10837,34 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         analysis_report = enforce_verdict_integrity(analysis_report)
 
         logger.info("📊 Generating Executive Intelligence Report...")
-        analysis_report['executive_summary'] = generate_executive_summary(
-            case_data,
-            timeline_result,
-            ingredient_result,
-            doc_result,
-            liability_result,
-            defence_result,
-            defect_result,
-            risk_result,
-            settlement_result,
-            presumption_result,
-            cross_exam_result,
-            judicial_behavior,
-            contradiction_result,
-            edge_case_result
-        )
+        try:
+            analysis_report['executive_summary'] = generate_executive_summary(
+                case_data,
+                timeline_result,
+                ingredient_result,
+                doc_result,
+                liability_result,
+                defence_result,
+                defect_result,
+                risk_result,
+                settlement_result,
+                presumption_result,
+                cross_exam_result,
+                judicial_behavior,
+                contradiction_result,
+                edge_case_result
+            )
+        except Exception as _e:
+            logger.error(f'❌ executive_summary failed: {_e}')
+            import traceback as _tb3; logger.error(_tb3.format_exc())
+            analysis_report['executive_summary'] = {
+                'case_overview': 'Summary generation failed — see full analysis',
+                'filing_verdict': 'See analysis',
+                'overall_assessment': 'ERROR',
+                'strengths': [], 'weaknesses': [], 'critical_risks': [],
+                'strategic_recommendations': [], 'next_actions': [],
+                'edge_cases_alert': [], 'fatal_defects_count': 0
+            }
 
         logger.info("🚀 Adding Enterprise Features...")
 
@@ -10858,7 +10889,7 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         kb_provisions = len(kb_court_patterns) if kb_court_patterns else 0
         if kb_provisions >= 10:  # Minimum threshold for statistical validity
             judicial_variance = simulate_judicial_variance(
-                analysis_report['modules']['risk_assessment']['overall_risk_score'],
+                (analysis_report['modules'].get('risk_assessment') or {}).get('overall_risk_score', 0),
                 {
                     'timeline': analysis_report['modules']['risk_assessment']['category_scores']['Timeline Compliance']['score'],
                     'ingredient': analysis_report['modules']['risk_assessment']['category_scores']['Ingredient Compliance']['score'],
@@ -10985,7 +11016,7 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
 
         logger.info("🎯 Classifying Case Outcome...")
         analysis_report['outcome_classification'] = classify_case_outcome(
-            risk_result['overall_risk_score'],
+            (risk_result.get('overall_risk_score') or 0),
             risk_result.get('fatal_defects', []),
             timeline_result.get('limitation_risk', 'UNKNOWN')
         )
@@ -11002,14 +11033,22 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
 
         logger.info("⚖️ Generating Professional Report Enhancements...")
 
+        # Safety guards — ensure results are dicts with expected keys
+        if not isinstance(risk_result, dict): risk_result = {'overall_risk_score': 0, 'category_scores': {}, 'fatal_defects': []}
+        if not isinstance(doc_result, dict): doc_result = {'overall_strength_score': 0}
+        if not isinstance(ingredient_result, dict): ingredient_result = {'overall_compliance': 0}
+        if not isinstance(liability_result, dict): liability_result = {}
+        if not isinstance(defect_result, dict): defect_result = {'overall_risk': 'Not assessed', 'fatal_defects': []}
+        if not isinstance(defence_result, dict): defence_result = {}
+
         primary_weakness = None
-        if doc_result['overall_strength_score'] < 70:
+        if (doc_result.get('overall_strength_score') or 0) < 70:
             primary_weakness = "documentary evidence"
-        elif ingredient_result['overall_compliance'] < 70:
+        elif (ingredient_result.get('overall_compliance') or 0) < 70:
             primary_weakness = "ingredient compliance"
 
         analysis_report['verdict'] = generate_verdict_one_liner(
-            risk_result['overall_risk_score'],
+            (risk_result.get('overall_risk_score') or 0),
             risk_result.get('fatal_defects', []),
             timeline_result.get('limitation_risk', 'LOW'),
             primary_weakness
@@ -11024,16 +11063,16 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
             documentary_gaps.append('postal_proof_missing')
 
         analysis_report['score_drivers'] = generate_score_drivers(
-            risk_result['category_scores'],
+            (risk_result.get('category_scores') or {}),
             risk_result.get('fatal_defects', []),
             documentary_gaps
         )
 
         analysis_report['court_impact'] = generate_court_impact_assessment(
-            risk_result['overall_risk_score'],
+            (risk_result.get('overall_risk_score') or 0),
             risk_result.get('fatal_defects', []),
             case_data.get('defence_type'),
-            doc_result['overall_strength_score']
+            (doc_result.get('overall_strength_score') or 0)
         )
 
         timeline_issues = []
@@ -11119,203 +11158,208 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         if "modules" in analysis_report:
             analysis_report["modules"] = sanitize_module_output(analysis_report["modules"])
 
-        # ── BUILD CENTRAL RESULT OBJECT ──────────────────────────────────────
-        # Single source of truth for all report generators.
-        # Every field guaranteed non-null. Report template reads ONLY from here.
-        _risk   = analysis_report.get('modules', {}).get('risk_assessment', {}) or {}
-        _tl     = analysis_report.get('modules', {}).get('timeline_intelligence', {}) or {}
-        _ing    = analysis_report.get('modules', {}).get('ingredient_compliance', {}) or {}
-        _doc    = analysis_report.get('modules', {}).get('documentary_strength', {}) or {}
-        _def    = analysis_report.get('modules', {}).get('procedural_defects', {}) or {}
-        _defm   = analysis_report.get('modules', {}).get('defence_matrix', {}) or {}
-        _cx     = analysis_report.get('modules', {}).get('cross_examination_risk', {}) or {}
-        _jud    = analysis_report.get('modules', {}).get('judicial_behavior', {}) or {}
-        _pres   = analysis_report.get('modules', {}).get('presumption_analysis', {}) or {}
-        _sett   = analysis_report.get('modules', {}).get('settlement_analysis', {}) or {}
-        _is_fatal = bool(analysis_report.get('fatal_flag'))
-
-        # Collect ALL fatal defects from all modules — deduplicated
-        _all_fatals = []
-        _all_fatals += (_risk.get('fatal_defects') or [])
-        _all_fatals += (_def.get('fatal_defects') or [])
-        _all_fatals += (_ing.get('fatal_defects') or [])
-        _seen_f, _uniq_f = set(), []
-        for _fd in _all_fatals:
-            _k = _fd.get('defect', str(_fd))
-            if _k not in _seen_f:
-                _seen_f.add(_k); _uniq_f.append(_fd)
-
-        # Category scores — guaranteed numeric
-        _cat = _risk.get('category_scores', {}) or {}
-        def _cscore(name, fb=0.0):
-            d = _cat.get(name)
-            try: return round(float(d.get('score') if isinstance(d,dict) else d), 1)
-            except: return fb
-
-        # Fatal override display — the "Capped at undefined" fix
-        _orig_score  = round(_risk.get('overall_risk_score', 0), 1)
-        _fdo         = _risk.get('fatal_defect_override', {}) or _risk.get('hard_fatal_override', {}) or {}
-        _orig_before = round(_fdo.get('original_score', _fdo.get('original_weighted_score', _orig_score)), 1)
-        _cap_val     = round(_fdo.get('capped_at', _fdo.get('overridden_score', _orig_score)), 1)
-        _cap_display = f"{_cap_val}/100"
-
-        # Processing time — guaranteed string, never "undefineds"
-        _pt_secs  = analysis_report.get('processing_time_seconds', 0) or 0
-        _pt_str   = f"{round(_pt_secs, 2):.2f}s" if _pt_secs > 0 else "< 1s"
-
-        # Timeline score — use module's score field, fall back to category score
-        _tl_score = _tl.get('score', _cscore('Timeline Compliance', 50))
-
-        # Documentary gaps — always named
-        _doc_gaps = []
-        for _field, _label, _sev, _imp in [
-            ('written_agreement_exists', 'No written loan/transaction agreement', 'Severe',
-             'Debt enforceability highly contestable — accused can deny legally enforceable debt'),
-            ('ledger_available',         'No ledger or account records',           'High',
-             'Transaction trail incomplete — no financial record of the alleged loan'),
-            ('postal_proof_available',   'No postal proof of notice',              'Moderate',
-             'Notice service unproven — accused can deny receiving the legal notice'),
-            ('original_cheque_available','Original cheque not secured',            'High',
-             'Primary instrument unavailable — foundational evidence at risk'),
-            ('return_memo_available',    'Bank dishonour memo missing',            'Severe',
-             'Proof of dishonour not secured — essential statutory ingredient at risk'),
-        ]:
-            if not case_data.get(_field, True):
-                _doc_gaps.append({'gap_name': _label, 'severity': _sev,
-                                   'impact': _imp, 'remedy': 'Obtain before filing'})
-
-        # Cross-examination questions — always populated
-        _cx_questions = list(_cx.get('likely_questions', []) or [])
-        if not _cx_questions:
-            if not case_data.get('written_agreement_exists'):
-                _cx_questions.append("Is it correct that there is no written agreement evidencing the alleged loan?")
-                _cx_questions.append("Can you explain why such a large amount was given without any documentation?")
-            if 'PREMATURE' in str(_tl.get('compliance_status', {}).get('limitation', '')).upper():
-                _cx_questions.append("Was this complaint filed before the 15-day payment notice period had expired?")
-                _cx_questions.append("Are you aware that a complaint under Section 138 is not maintainable before the cause of action arises?")
+        try:
+            # ── BUILD CENTRAL RESULT OBJECT ──────────────────────────────────────
+            # Single source of truth for all report generators.
+            # Every field guaranteed non-null. Report template reads ONLY from here.
+            _risk   = analysis_report.get('modules', {}).get('risk_assessment', {}) or {}
+            _tl     = analysis_report.get('modules', {}).get('timeline_intelligence', {}) or {}
+            _ing    = analysis_report.get('modules', {}).get('ingredient_compliance', {}) or {}
+            _doc    = analysis_report.get('modules', {}).get('documentary_strength', {}) or {}
+            _def    = analysis_report.get('modules', {}).get('procedural_defects', {}) or {}
+            _defm   = analysis_report.get('modules', {}).get('defence_matrix', {}) or {}
+            _cx     = analysis_report.get('modules', {}).get('cross_examination_risk', {}) or {}
+            _jud    = analysis_report.get('modules', {}).get('judicial_behavior', {}) or {}
+            _pres   = analysis_report.get('modules', {}).get('presumption_analysis', {}) or {}
+            _sett   = analysis_report.get('modules', {}).get('settlement_analysis', {}) or {}
+            _is_fatal = bool(analysis_report.get('fatal_flag'))
+    
+            # Collect ALL fatal defects from all modules — deduplicated
+            _all_fatals = []
+            _all_fatals += (_risk.get('fatal_defects') or [])
+            _all_fatals += (_def.get('fatal_defects') or [])
+            _all_fatals += (_ing.get('fatal_defects') or [])
+            _seen_f, _uniq_f = set(), []
+            for _fd in _all_fatals:
+                _k = _fd.get('defect', str(_fd))
+                if _k not in _seen_f:
+                    _seen_f.add(_k); _uniq_f.append(_fd)
+    
+            # Category scores — guaranteed numeric
+            _cat = _risk.get('category_scores', {}) or {}
+            def _cscore(name, fb=0.0):
+                d = _cat.get(name)
+                try: return round(float(d.get('score') if isinstance(d,dict) else d), 1)
+                except: return fb
+    
+            # Fatal override display — the "Capped at undefined" fix
+            _orig_score  = round(_risk.get('overall_risk_score', 0), 1)
+            _fdo         = _risk.get('fatal_defect_override', {}) or _risk.get('hard_fatal_override', {}) or {}
+            _orig_before = round(_fdo.get('original_score', _fdo.get('original_weighted_score', _orig_score)), 1)
+            _cap_val     = round(_fdo.get('capped_at', _fdo.get('overridden_score', _orig_score)), 1)
+            _cap_display = f"{_cap_val}/100"
+    
+            # Processing time — guaranteed string, never "undefineds"
+            _pt_secs  = analysis_report.get('processing_time_seconds', 0) or 0
+            _pt_str   = f"{round(_pt_secs, 2):.2f}s" if _pt_secs > 0 else "< 1s"
+    
+            # Timeline score — use module's score field, fall back to category score
+            _tl_score = _tl.get('score', _cscore('Timeline Compliance', 50))
+    
+            # Documentary gaps — always named
+            _doc_gaps = []
+            for _field, _label, _sev, _imp in [
+                ('written_agreement_exists', 'No written loan/transaction agreement', 'Severe',
+                 'Debt enforceability highly contestable — accused can deny legally enforceable debt'),
+                ('ledger_available',         'No ledger or account records',           'High',
+                 'Transaction trail incomplete — no financial record of the alleged loan'),
+                ('postal_proof_available',   'No postal proof of notice',              'Moderate',
+                 'Notice service unproven — accused can deny receiving the legal notice'),
+                ('original_cheque_available','Original cheque not secured',            'High',
+                 'Primary instrument unavailable — foundational evidence at risk'),
+                ('return_memo_available',    'Bank dishonour memo missing',            'Severe',
+                 'Proof of dishonour not secured — essential statutory ingredient at risk'),
+            ]:
+                if not case_data.get(_field, True):
+                    _doc_gaps.append({'gap_name': _label, 'severity': _sev,
+                                       'impact': _imp, 'remedy': 'Obtain before filing'})
+    
+            # Cross-examination questions — always populated
+            _cx_questions = list(_cx.get('likely_questions', []) or [])
+            if not _cx_questions:
+                if not case_data.get('written_agreement_exists'):
+                    _cx_questions.append("Is it correct that there is no written agreement evidencing the alleged loan?")
+                    _cx_questions.append("Can you explain why such a large amount was given without any documentation?")
+                if 'PREMATURE' in str(_tl.get('compliance_status', {}).get('limitation', '')).upper():
+                    _cx_questions.append("Was this complaint filed before the 15-day payment notice period had expired?")
+                    _cx_questions.append("Are you aware that a complaint under Section 138 is not maintainable before the cause of action arises?")
+                if not case_data.get('postal_proof_available'):
+                    _cx_questions.append("Do you have an Acknowledgment Due (AD) card proving the accused received your notice?")
+                if not case_data.get('ledger_available'):
+                    _cx_questions.append("Can you produce any bank statement or ledger entry showing the transfer of this amount?")
+                _cx_questions.append("On what date exactly was the cheque amount given to the accused, and in what form — cash, cheque, or bank transfer?")
+                _cx_questions.append("Who was present at the time the alleged loan was made?")
+            if not _cx_questions:
+                _cx_questions = [
+                    "Is it correct that there is no written record of this transaction?",
+                    "Can you produce any independent witness to the alleged transaction?",
+                    "Was the cheque given as security for a debt or as direct payment?",
+                ]
+    
+            # Next actions — always structured dicts
+            _next_actions = []
+            for _fd in _uniq_f[:3]:
+                _next_actions.append({
+                    'action':  str(_fd.get('remedy', _fd.get('defect', 'Address fatal defect')) or 'Consult legal counsel'),
+                    'urgency': 'URGENT',
+                    'details': str(_fd.get('impact', 'This defect will cause dismissal of the complaint') or '')
+                })
             if not case_data.get('postal_proof_available'):
-                _cx_questions.append("Do you have an Acknowledgment Due (AD) card proving the accused received your notice?")
-            if not case_data.get('ledger_available'):
-                _cx_questions.append("Can you produce any bank statement or ledger entry showing the transfer of this amount?")
-            _cx_questions.append("On what date exactly was the cheque amount given to the accused, and in what form — cash, cheque, or bank transfer?")
-            _cx_questions.append("Who was present at the time the alleged loan was made?")
-        if not _cx_questions:
-            _cx_questions = [
-                "Is it correct that there is no written record of this transaction?",
-                "Can you produce any independent witness to the alleged transaction?",
-                "Was the cheque given as security for a debt or as direct payment?",
-            ]
-
-        # Next actions — always structured dicts
-        _next_actions = []
-        for _fd in _uniq_f[:3]:
-            _next_actions.append({
-                'action':  str(_fd.get('remedy', _fd.get('defect', 'Address fatal defect')) or 'Consult legal counsel'),
-                'urgency': 'URGENT',
-                'details': str(_fd.get('impact', 'This defect will cause dismissal of the complaint') or '')
-            })
-        if not case_data.get('postal_proof_available'):
-            _next_actions.append({'action': 'Obtain AD card or speed-post tracking confirmation for notice',
-                                   'urgency': 'HIGH', 'details': 'Without postal proof, notice service can be challenged'})
-        if not case_data.get('written_agreement_exists'):
-            _next_actions.append({'action': 'Collect WhatsApp/email/SMS evidence of the transaction',
-                                   'urgency': 'MEDIUM', 'details': 'Absence of written agreement is primary defence weakness'})
-        if not _next_actions:
-            _next_actions.append({'action': 'Proceed with final legal review before filing',
-                                   'urgency': 'NORMAL', 'details': 'Case is in reasonable position'})
-
-        # Presumption
-        _pres_stage  = str(_pres.get('current_stage', 'Not assessed') or 'Not assessed')
-        _pres_burden = str(_pres.get('burden_position', 'Not assessed') or 'Not assessed')
-
-        # Judicial behaviour
-        _jud_conf    = str(_jud.get('confidence', 'Insufficient data') or 'Insufficient data')
-        _jud_court   = str(_jud.get('court_identified', case_data.get('court_location', 'Not specified')) or 'Not specified')
-        _jud_note    = (
-            'Judicial behaviour analysis unavailable — insufficient court data in knowledge base.'
-            if _jud_conf in ('LOW', 'Insufficient data', 'Not available') else
-            f"Based on cases from {_jud_court}. Confidence: {_jud_conf}."
-        )
-
-        # Filing verdict
-        if _is_fatal:
-            _filing_verdict = "DO NOT FILE — FATAL DEFECTS PRESENT"
-        elif _orig_score >= 75:
-            _filing_verdict = "READY TO FILE — STRONG CASE"
-        elif _orig_score >= 55:
-            _filing_verdict = "FILE WITH CAUTION — EVIDENCE GAPS PRESENT"
-        else:
-            _filing_verdict = "HIGH RISK — REMEDIATION REQUIRED BEFORE FILING"
-
-        # ── Store central result object ───────────────────────────
-        analysis_report['_result'] = {
-            # Scores
-            'overall_score':         _orig_score,
-            'overall_score_display': f"{_orig_score:.1f}/100",
-            'original_score':        _orig_before,
-            'capped_at':             _cap_val,
-            'capped_at_display':     _cap_display,
-            'fatal_override_applied': _is_fatal and bool(_fdo),
-            'fatal_override_note':   (
-                f"Original: {_orig_before}/100 → Capped at {_cap_display} due to fatal defect"
-                if (_is_fatal and bool(_fdo)) else
-                "No fatal override applied"
-            ),
-            'timeline_score':        _tl_score,
-            'ingredient_score':      _cscore('Ingredient Compliance'),
-            'documentary_score':     _cscore('Documentary Strength', _doc.get('overall_strength_score', 0)),
-            'procedural_score':      _cscore('Procedural Compliance'),
-            'liability_score':       _cscore('Liability Expansion'),
-            'compliance_level':      str(_risk.get('compliance_level', 'Under Review') or 'Under Review'),
-            # Fatal
-            'is_fatal':              _is_fatal,
-            'fatal_defects_count':   len(_uniq_f),
-            'fatal_defects':         [
-                {'defect':   str(d.get('defect','Unknown defect')),
-                 'severity': str(d.get('severity','CRITICAL')),
-                 'impact':   str(d.get('impact','Complaint will be dismissed') or ''),
-                 'remedy':   str(d.get('remedy', d.get('cure','Consult legal counsel')) or 'Consult legal counsel')}
-                for d in _uniq_f
-            ],
-            # Filing
-            'filing_verdict':        _filing_verdict,
-            # Time
-            'processing_time':       _pt_str,
-            'processing_time_seconds': _pt_secs,
-            # Documentary
-            'documentary_gaps':      _doc_gaps,
-            'documentary_gaps_count': len(_doc_gaps),
-            # Cross-exam
-            'cross_exam_questions':  _cx_questions[:8],
-            'cross_exam_risk':       str(_cx.get('overall_cross_exam_risk') or _cx.get('overall_risk') or 'Not assessed'),
-            'cross_exam_zones':      [
-                {'zone': str(z.get('zone', z.get('area',''))),
-                 'risk': str(z.get('risk_level', z.get('severity','MEDIUM')))}
-                for z in (_cx.get('vulnerability_zones') or [])[:4]
-            ],
+                _next_actions.append({'action': 'Obtain AD card or speed-post tracking confirmation for notice',
+                                       'urgency': 'HIGH', 'details': 'Without postal proof, notice service can be challenged'})
+            if not case_data.get('written_agreement_exists'):
+                _next_actions.append({'action': 'Collect WhatsApp/email/SMS evidence of the transaction',
+                                       'urgency': 'MEDIUM', 'details': 'Absence of written agreement is primary defence weakness'})
+            if not _next_actions:
+                _next_actions.append({'action': 'Proceed with final legal review before filing',
+                                       'urgency': 'NORMAL', 'details': 'Case is in reasonable position'})
+    
             # Presumption
-            'presumption_stage':     _pres_stage,
-            'burden_position':       _pres_burden,
-            'presumption_activated': bool(_pres.get('presumption_activated') or _pres.get('presumption_triggered')),
-            # Judicial
-            'court_name':            _jud_court,
-            'court_confidence':      _jud_conf,
-            'court_note':            _jud_note,
-            'court_indices':         {k: str(v) for k,v in (_jud.get('behavioral_indices') or {}).items()},
-            # Next actions
-            'next_actions':          _next_actions,
-            # Settlement
-            'cheque_amount':         case_data.get('cheque_amount', 0),
-            'settlement_recommended': bool(_sett.get('settlement_recommended')),
-            'settlement_range':      str(_sett.get('recommended_settlement_range', 'Not calculated') or 'Not calculated'),
-            # Platform
-            'platform_name':         'JUDIQ Legal Intelligence Platform',
-            'platform_email':        'hello@judiq.ai',
-            'platform_website':      'www.judiq.ai',
-            'case_id':               str(analysis_report.get('case_id', '')),
-            'generated_date':        datetime.now().strftime('%d %B %Y'),
-            'engine_version':        str(analysis_report.get('engine_version', 'v10.0')),
-        }
+            _pres_stage  = str(_pres.get('current_stage', 'Not assessed') or 'Not assessed')
+            _pres_burden = str(_pres.get('burden_position', 'Not assessed') or 'Not assessed')
+    
+            # Judicial behaviour
+            _jud_conf    = str(_jud.get('confidence', 'Insufficient data') or 'Insufficient data')
+            _jud_court   = str(_jud.get('court_identified', case_data.get('court_location', 'Not specified')) or 'Not specified')
+            _jud_note    = (
+                'Judicial behaviour analysis unavailable — insufficient court data in knowledge base.'
+                if _jud_conf in ('LOW', 'Insufficient data', 'Not available') else
+                f"Based on cases from {_jud_court}. Confidence: {_jud_conf}."
+            )
+    
+            # Filing verdict
+            if _is_fatal:
+                _filing_verdict = "DO NOT FILE — FATAL DEFECTS PRESENT"
+            elif _orig_score >= 75:
+                _filing_verdict = "READY TO FILE — STRONG CASE"
+            elif _orig_score >= 55:
+                _filing_verdict = "FILE WITH CAUTION — EVIDENCE GAPS PRESENT"
+            else:
+                _filing_verdict = "HIGH RISK — REMEDIATION REQUIRED BEFORE FILING"
+    
+            # ── Store central result object ───────────────────────────
+            analysis_report['_result'] = {
+                # Scores
+                'overall_score':         _orig_score,
+                'overall_score_display': f"{_orig_score:.1f}/100",
+                'original_score':        _orig_before,
+                'capped_at':             _cap_val,
+                'capped_at_display':     _cap_display,
+                'fatal_override_applied': _is_fatal and bool(_fdo),
+                'fatal_override_note':   (
+                    f"Original: {_orig_before}/100 → Capped at {_cap_display} due to fatal defect"
+                    if (_is_fatal and bool(_fdo)) else
+                    "No fatal override applied"
+                ),
+                'timeline_score':        _tl_score,
+                'ingredient_score':      _cscore('Ingredient Compliance'),
+                'documentary_score':     _cscore('Documentary Strength', _doc.get('overall_strength_score', 0)),
+                'procedural_score':      _cscore('Procedural Compliance'),
+                'liability_score':       _cscore('Liability Expansion'),
+                'compliance_level':      str(_risk.get('compliance_level', 'Under Review') or 'Under Review'),
+                # Fatal
+                'is_fatal':              _is_fatal,
+                'fatal_defects_count':   len(_uniq_f),
+                'fatal_defects':         [
+                    {'defect':   str(d.get('defect','Unknown defect')),
+                     'severity': str(d.get('severity','CRITICAL')),
+                     'impact':   str(d.get('impact','Complaint will be dismissed') or ''),
+                     'remedy':   str(d.get('remedy', d.get('cure','Consult legal counsel')) or 'Consult legal counsel')}
+                    for d in _uniq_f
+                ],
+                # Filing
+                'filing_verdict':        _filing_verdict,
+                # Time
+                'processing_time':       _pt_str,
+                'processing_time_seconds': _pt_secs,
+                # Documentary
+                'documentary_gaps':      _doc_gaps,
+                'documentary_gaps_count': len(_doc_gaps),
+                # Cross-exam
+                'cross_exam_questions':  _cx_questions[:8],
+                'cross_exam_risk':       str(_cx.get('overall_cross_exam_risk') or _cx.get('overall_risk') or 'Not assessed'),
+                'cross_exam_zones':      [
+                    {'zone': str(z.get('zone', z.get('area',''))),
+                     'risk': str(z.get('risk_level', z.get('severity','MEDIUM')))}
+                    for z in (_cx.get('vulnerability_zones') or [])[:4]
+                ],
+                # Presumption
+                'presumption_stage':     _pres_stage,
+                'burden_position':       _pres_burden,
+                'presumption_activated': bool(_pres.get('presumption_activated') or _pres.get('presumption_triggered')),
+                # Judicial
+                'court_name':            _jud_court,
+                'court_confidence':      _jud_conf,
+                'court_note':            _jud_note,
+                'court_indices':         {k: str(v) for k,v in (_jud.get('behavioral_indices') or {}).items()},
+                # Next actions
+                'next_actions':          _next_actions,
+                # Settlement
+                'cheque_amount':         case_data.get('cheque_amount', 0),
+                'settlement_recommended': bool(_sett.get('settlement_recommended')),
+                'settlement_range':      str(_sett.get('recommended_settlement_range', 'Not calculated') or 'Not calculated'),
+                # Platform
+                'platform_name':         'JUDIQ Legal Intelligence Platform',
+                'platform_email':        'hello@judiq.ai',
+                'platform_website':      'www.judiq.ai',
+                'case_id':               str(analysis_report.get('case_id', '')),
+                'generated_date':        datetime.now().strftime('%d %B %Y'),
+                'engine_version':        str(analysis_report.get('engine_version', 'v10.0')),
+            }
+        except Exception as _e:
+            logger.error(f'❌ _result building failed: {_e}')
+            import traceback as _tb2; logger.error(_tb2.format_exc())
+            analysis_report['_result'] = {'overall_score': analysis_report.get('risk_score', 0), 'is_fatal': bool(analysis_report.get('fatal_flag')), 'filing_status': 'See analysis', 'processing_time': '0s', 'documentary_gaps': [], 'cross_exam_questions': [], 'next_actions': [], 'presumption_stage': 'Not assessed', 'burden_position': 'Not assessed', 'court_name': 'Not specified', 'court_confidence': 'Insufficient data', 'court_note': 'Analysis incomplete', 'capped_at': 0, 'capped_at_display': '0/100', 'original_score': 0, 'fatal_override_note': ''}
         logger.info(f"✅ Central result object built: {len(analysis_report['_result'])} fields")
 
         # ── FLAT KEY ALIASES ─────────────────────────────────────────────────
@@ -11338,7 +11382,12 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         )
         # ─────────────────────────────────────────────────────────────────────
 
-        analysis_report['professional_report'] = generate_clean_professional_report(analysis_report, case_data)
+        try:
+            analysis_report['professional_report'] = generate_clean_professional_report(analysis_report, case_data)
+        except Exception as _e:
+            logger.error(f'❌ professional_report generation failed: {_e}')
+            analysis_report['professional_report'] = {'error': str(_e), 'report_format': 'Error'}
+
 
         # Verdict already enforced before executive summary (line 7456)
         # No need to enforce again
@@ -12097,8 +12146,9 @@ async def analyze_case(request: CaseAnalysisRequest, http_request: Request = Non
                 "success": False,
                 "error": "Analysis execution failed",
                 "error_message": error_msg,
-                "error_details": analysis.get('error_traceback'),
-                "audit_trail": audit.get_trail()
+                "error_details": analysis.get('error_traceback', ''),
+                "debug_traceback": analysis.get('error_traceback', ''),
+                "audit_trail": audit.get_trail() if 'audit' in dir() else {}
             }
 
         analysis['audit_trail'] = audit.get_trail()
