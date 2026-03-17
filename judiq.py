@@ -11337,6 +11337,26 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         }
         logger.info(f"✅ Central result object built: {len(analysis_report['_result'])} fields")
 
+        # ── FLAT KEY ALIASES ─────────────────────────────────────────────────
+        # Frontend reads analysis.timeline, analysis.ingredients etc.
+        # instead of analysis.modules.timeline_intelligence etc.
+        # These are direct references — no copy, no memory overhead.
+        _m = analysis_report.get('modules', {})
+        analysis_report['timeline']        = _m.get('timeline_intelligence', {})
+        analysis_report['ingredients']     = _m.get('ingredient_compliance', {})
+        analysis_report['documentary']     = _m.get('documentary_strength', {})
+        analysis_report['defence']         = _m.get('defence_matrix', {})
+        analysis_report['procedural']      = _m.get('procedural_defects', {})
+        analysis_report['cross_examination'] = _m.get('cross_examination_risk', {})
+        analysis_report['settlement']      = _m.get('settlement_analysis', {})
+        analysis_report['judicial']        = _m.get('judicial_behavior', {})
+        analysis_report['risk_assessment'] = _m.get('risk_assessment', {})
+        analysis_report['overall_score']   = (
+            _m.get('risk_assessment', {}).get('overall_risk_score', 0) or
+            analysis_report.get('risk_score', 0)
+        )
+        # ─────────────────────────────────────────────────────────────────────
+
         analysis_report['professional_report'] = generate_clean_professional_report(analysis_report, case_data)
 
         # Verdict already enforced before executive summary (line 7456)
@@ -12123,6 +12143,21 @@ async def analyze_case(request: CaseAnalysisRequest, http_request: Request = Non
         # Generate plain-language summary for lawyers
         plain_summary = generate_plain_summary(analysis, case_data)
 
+        # Ensure flat aliases exist even if analysis came from cache/DB
+        _am = analysis.get('modules', {})
+        analysis.setdefault('timeline',          _am.get('timeline_intelligence', {}))
+        analysis.setdefault('ingredients',       _am.get('ingredient_compliance', {}))
+        analysis.setdefault('documentary',       _am.get('documentary_strength', {}))
+        analysis.setdefault('defence',           _am.get('defence_matrix', {}))
+        analysis.setdefault('procedural',        _am.get('procedural_defects', {}))
+        analysis.setdefault('cross_examination', _am.get('cross_examination_risk', {}))
+        analysis.setdefault('settlement',        _am.get('settlement_analysis', {}))
+        analysis.setdefault('judicial',          _am.get('judicial_behavior', {}))
+        analysis.setdefault('risk_assessment',   _am.get('risk_assessment', {}))
+        analysis.setdefault('overall_score',
+            _am.get('risk_assessment', {}).get('overall_risk_score', 0) or
+            analysis.get('risk_score', 0))
+
         return {
             "success": True,
             "case_id": analysis['case_id'],
@@ -12130,7 +12165,18 @@ async def analyze_case(request: CaseAnalysisRequest, http_request: Request = Non
             "plain_summary":     plain_summary,
             "executive_summary": analysis.get('executive_summary', {}),
             "report":            analysis.get('professional_report', {}),
-            "result":            analysis.get('_result', {}),   # ← central result object — PDF template reads this
+            "result":            analysis.get('_result', {}),
+            # ── Flat module aliases (frontend shortcut keys) ───────────
+            "timeline":          analysis.get('timeline', {}),
+            "ingredients":       analysis.get('ingredients', {}),
+            "documentary":       analysis.get('documentary', {}),
+            "defence":           analysis.get('defence', {}),
+            "procedural":        analysis.get('procedural', {}),
+            "cross_examination": analysis.get('cross_examination', {}),
+            "settlement":        analysis.get('settlement', {}),
+            "judicial":          analysis.get('judicial', {}),
+            "risk_assessment":   analysis.get('risk_assessment', {}),
+            "overall_score":     analysis.get('overall_score', 0),
             # ── Full detail ────────────────────────────────────────────
             "analysis": analysis,
             "api_response_time_ms": round((time.time() - start) * 1000, 1),
