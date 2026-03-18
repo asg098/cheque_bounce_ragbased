@@ -13116,12 +13116,7 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
             _cap_display = f"{_cap_val}/100"
     
             # Processing time — guaranteed string, never "undefineds"
-            _pt_secs  = analysis_report.get('processing_time_seconds') or 0
-            if _pt_secs == 0:
-                import time as _time
-                _pt_secs = round(_time.time() - start_time, 2) if 'start_time' in dir() else 0
-                if _pt_secs > 0: analysis_report['processing_time_seconds'] = _pt_secs
-            _pt_str   = f"{_pt_secs:.2f}s" if _pt_secs > 0 else "< 1s"
+            # _pt_secs and _pt_str now computed in derived fields block above
     
             # Timeline score — use module's score field, fall back to category score
             _tl_score = _tl.get('score', _cscore('Timeline Compliance', 50))
@@ -13237,6 +13232,90 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
                 if _rm.get('severity') == 'HIGH' and _rm.get('issue','') not in [d.get('defect','') for d in _uniq_f]:
                     _high_issues.append({'issue': _rm.get('issue',''), 'severity': 'HIGH',
                                          'source': 'timeline', 'impact': _rm.get('impact','')})
+            # ── Derived fields for _result (must be defined here) ────────
+            _fatal_count_display = len(_uniq_f)          # after dedup
+            _primary_fatal       = _uniq_f[0] if _uniq_f else None
+            _refiling            = _tl.get('refiling_window') or {}
+            _outcome_prob        = _risk.get('outcome_probability') or {}
+            _score_cap           = _risk.get('score_cap_explanation') or {}
+            _base_score_display  = round(float(_score_cap.get('base_score', _orig_before) or _orig_before), 1)
+
+            # ── Issue 2/3/5/6: Same-day filing is HIGH RISK not FATAL ──
+            # Re-classify same-day filing to avoid over-aggressive fatal marking
+            _same_day_filing = any(
+                'same-day' in str(d.get('defect','')).lower() or
+                'same day' in str(d.get('defect','')).lower() or
+                'same date' in str(d.get('defect','')).lower()
+                for d in _uniq_f
+            )
+            if _same_day_filing:
+                # Move same-day from fatal to high-risk — it's interpretational, not absolute
+                _uniq_f_real_fatal = [d for d in _uniq_f if 'same-day' not in str(d.get('defect','')).lower()
+                                      and 'same day' not in str(d.get('defect','')).lower()
+                                      and 'same date' not in str(d.get('defect','')).lower()]
+                _same_day_defects  = [d for d in _uniq_f if d not in _uniq_f_real_fatal]
+                # Downgrade: mark as HIGH not FATAL/CRITICAL
+                for _sd in _same_day_defects:
+                    _sd['severity']  = 'HIGH'
+                    _sd['is_fatal']  = False
+                    _sd['risk_note'] = ('Interpretation-dependent — some courts dismiss, others allow. '
+                                       'Not an absolute bar unlike premature complaint.')
+                # Re-evaluate is_fatal based on REAL fatals only
+                if not _uniq_f_real_fatal:
+                    _is_fatal = False
+                    # Recalculate verdict without fatal flag
+                    if _orig_score >= 75:
+                        _filing_verdict = 'FILE WITH CAUTION — SAME-DAY FILING RISK'
+                    elif _orig_score >= 55:
+                        _filing_verdict = 'FILE WITH CAUTION — PROCEDURAL RISK + EVIDENCE GAPS'
+                    else:
+                        _filing_verdict = 'HIGH RISK — ADDRESS PROCEDURAL RISK BEFORE FILING'
+                    _orig_score = max(_orig_score, _orig_before * 0.7)  # restore partial score
+
+            # ── Issue 5: Fix limitation_risk label ──
+            _tl_limitation_status = str((_tl.get('compliance_status') or {}).get('limitation', ''))
+            _tl_limitation_risk_raw = _tl.get('limitation_risk', 'LOW')
+            # If timeline says compliant but risk is CRITICAL — use timeline's own status
+            if ('WITHIN' in _tl_limitation_status.upper() or 'COMPLIANT' in _tl_limitation_status.upper()):
+                _limitation_risk_display = 'LOW'
+            elif 'SAME-DAY' in _tl_limitation_status.upper():
+                _limitation_risk_display = 'HIGH — Same-day filing (interpretation dependent)'
+            elif 'PREMATURE' in _tl_limitation_status.upper():
+                _limitation_risk_display = 'CRITICAL — Filed before cause of action'
+            elif 'BARRED' in _tl_limitation_status.upper():
+                _limitation_risk_display = 'CRITICAL — Time-barred'
+            else:
+                _limitation_risk_display = _tl_limitation_risk_raw
+
+            # ── Issue 1: Single consistent score source ──
+            # _orig_score is the final score — ensure it's never 0 if base was valid
+            if _orig_score == 0 and _orig_before > 0 and not _uniq_f:
+                _orig_score = _orig_before  # no fatal — restore base score
+
+            # ── Issue 11: Processing time ──
+            _pt_secs  = analysis_report.get('processing_time_seconds') or 0
+            if _pt_secs == 0:
+                import time as _time
+                _pt_secs = round(_time.time() - start_time, 2) if 'start_time' in dir() else 0
+                if _pt_secs > 0: analysis_report['processing_time_seconds'] = _pt_secs
+            _pt_str   = f"{_pt_secs:.2f}s" if _pt_secs > 0 else "< 1s"
+
+            # ── Issue 12: Data completeness — compute real % ──
+            _data_fields = [
+                'cheque_date', 'dishonour_date', 'notice_date', 'complaint_filed_date',
+                'cheque_amount', 'bank_name', 'court_location', 'notice_received_date'
+            ]
+            _filled = sum(1 for f in _data_fields if case_data.get(f))
+            _data_completeness_pct = round(_filled / len(_data_fields) * 100)
+
+            # ── Issue 12: Analysis confidence ──
+            _modules_populated = sum(1 for m in [_tl, _ing, _doc, _risk, _pres, _cx, _def] if m)
+            _analysis_confidence = (
+                'HIGH'   if _modules_populated >= 6 and _orig_score > 0 else
+                'MEDIUM' if _modules_populated >= 4 and _orig_score > 0 else
+                'LOW'
+            )
+
             # ── Store central result object ───────────────────────────
             analysis_report['_result'] = {
                 # Scores
@@ -13260,13 +13339,15 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
                 # Fatal
                 'is_fatal':              _is_fatal,
                 'fatal_defects_count':   _fatal_count_display,
-            'primary_fatal_defect':  {
-                'defect':   str(_primary_fatal.get('defect','') if _primary_fatal else ''),
-                'severity': str(_primary_fatal.get('severity','CRITICAL') if _primary_fatal else ''),
-                'impact':   str(_primary_fatal.get('impact','') if _primary_fatal else ''),
-                'remedy':   str(_primary_fatal.get('remedy', _primary_fatal.get('cure','Consult legal counsel')) if _primary_fatal else ''),
-                'legal_basis': str(_primary_fatal.get('legal_basis','Section 138 NI Act') if _primary_fatal else ''),
-            } if _primary_fatal else None,
+                'primary_fatal_defect':  ({
+                    'defect':      str(_primary_fatal.get('defect','') if _primary_fatal else ''),
+                    'severity':    str(_primary_fatal.get('severity','CRITICAL') if _primary_fatal else ''),
+                    'is_absolute': not _same_day_filing,
+                    'risk_note':   _primary_fatal.get('risk_note','') if _primary_fatal else '',
+                    'impact':      str(_primary_fatal.get('impact','') if _primary_fatal else ''),
+                    'remedy':      str(_primary_fatal.get('remedy', _primary_fatal.get('cure','Consult legal counsel')) if _primary_fatal else ''),
+                    'legal_basis': str(_primary_fatal.get('legal_basis','Section 138 NI Act') if _primary_fatal else ''),
+                }) if _primary_fatal else None,
                 'fatal_issues':          _fatal_issues,
                 'high_risk_issues':      _high_issues[:5],
                 'moderate_issues':       _moderate_issues[:5],
@@ -13325,14 +13406,10 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
                 ''
             ),
             # Analysis confidence
-            'analysis_confidence':    (
-                'HIGH' if len([m for m in [_tl, _ing, _doc, _risk] if m]) >= 4 else
-                'MEDIUM' if len([m for m in [_tl, _ing, _doc, _risk] if m]) >= 2 else
-                'LOW'
-            ),
+            'analysis_confidence':    _analysis_confidence,
             'confidence_note': (
                 'All core modules executed — high confidence in analysis'
-                if len([m for m in [_tl, _ing, _doc, _risk] if m]) >= 4 else
+                if _analysis_confidence == 'HIGH' else
                 'Some modules incomplete — review with qualified counsel'
             ),
                 # Settlement
@@ -13349,11 +13426,14 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
                 'refiling_deadline':      (_tl.get('refiling_window') or {}).get('deadline_date', ''),
                 'refiling_message':       (_tl.get('refiling_window') or {}).get('message', '') or str(_tl.get('refile_guidance', '')),
                 # Score cap explanation — WHY is the score X?
-                'base_score_before_cap':  round((_risk.get('score_cap_explanation') or {}).get('base_score', float(_orig_score)), 1),
+                'base_score_before_cap':  _base_score_display,
+                'base_score_display':     f"{_base_score_display}/100",
                 'score_cap_note':         (
-                    f"Base score {round((_risk.get('score_cap_explanation') or {}).get('base_score', float(_orig_score)),1)}/100 "
-                    f"→ Fatal penalty applied → Final score {_orig_score}/100"
-                ) if _is_fatal else '',
+                    f"Base: {_base_score_display}/100 → Fatal override → Final: {_orig_score:.1f}/100"
+                    if (_is_fatal and _base_score_display != _orig_score) else
+                    f"Score: {_orig_score:.1f}/100 (no fatal override applied)"
+                    if not _is_fatal else ''
+                ),
                 # Primary fatal defect (single canonical entry)
                 # Deep Legal Intelligence Module Summaries
             'dishonour_reason_category': str((_m.get('dishonour_analysis') or {}).get('reason_category', 'Not assessed')),
@@ -13368,6 +13448,10 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
             'doc_validity_score':        int((_m.get('document_validity') or {}).get('admissibility_score', 100)),
             'fraud_risk_score':          int((_m.get('fraud_signals') or {}).get('fraud_risk_score', 0)),
             'fraud_risk_level':          str((_m.get('fraud_signals') or {}).get('risk_level', 'LOW')),
+                # Core metrics
+                'data_completeness':       _data_completeness_pct,
+                'filing_status':           _filing_verdict,
+                'limitation_risk':        _limitation_risk_display,
                 # Advanced module summaries (all 10 legal intelligence modules)
                 'dishonour_category':      str((_mods.get('dishonour_analysis') or {}).get('reason_category','Not specified')),
                 'dishonour_strength':       str((_mods.get('dishonour_analysis') or {}).get('legal_strength','Unknown')),
