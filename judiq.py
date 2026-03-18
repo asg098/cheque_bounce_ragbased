@@ -4188,6 +4188,20 @@ def analyze_ingredients(case_data: Dict, timeline_data: Dict) -> Dict:
     else:
         ingredients['risk_level'] = 'HIGH - Weak Compliance'
 
+    # Add context note when ingredients are strong but case has procedural issues
+    _ing_comp = ingredients.get('overall_compliance', 0) or 0
+    _ing_fatals = [d for d in ingredients.get('ingredient_details', []) if d.get('score', 100) < 30]
+    if _ing_comp >= 70 and not _ing_fatals:
+        ingredients['context_note'] = (
+            f'Strong ingredient compliance ({_ing_comp:.1f}/100) — statutory requirements well-satisfied. '
+            'Note: Final risk score may still be capped if procedural or timeline defects exist.'
+        )
+    elif _ing_comp >= 60 and _ing_fatals:
+        ingredients['context_note'] = (
+            f'Good compliance in most ingredients ({_ing_comp:.1f}/100), '
+            f'but {len(_ing_fatals)} ingredient(s) need attention.'
+        )
+
     return ingredients
 
 def analyze_presumption_rebuttal(case_data: Dict, ingredient_data: Dict, doc_data: Dict) -> Dict:
@@ -5478,6 +5492,22 @@ def analyze_defence_vulnerabilities(case_data: Dict, ingredient_analysis: Dict, 
     })
 
     if defence_matrix['possible_defences']:
+        # Enrich each defence with stage, strength label, and court impact
+        for _d in defence_matrix['possible_defences']:
+            _sc = _d.get('strength_score', 0) or 0
+            _pr = _d.get('probability', '')
+            if _sc >= 80 or _pr in ('CERTAIN', 'VERY HIGH'):
+                _d['strength_label'] = 'FATAL — Complaint dismissible'
+                _d['stage']          = 'Pre-trial — discharge application at first hearing (S.245 CrPC)'
+            elif _sc >= 60 or _pr == 'HIGH':
+                _d['strength_label'] = 'HIGH — Strong defence at trial'
+                _d['stage']          = 'Trial stage — likely acquittal if argued effectively'
+            elif _sc >= 40 or _pr == 'MEDIUM':
+                _d['strength_label'] = 'MEDIUM — Viable defence'
+                _d['stage']          = 'Trial stage — outcome depends on cross-examination'
+            else:
+                _d['strength_label'] = 'LOW — Weak defence'
+                _d['stage']          = 'Unlikely to succeed without strong corroboration'
         strongest = max(defence_matrix['possible_defences'], key=lambda x: x['strength_score'])
         # Always store as string for clean PDF display
         if isinstance(strongest, dict):
@@ -5652,15 +5682,37 @@ def scan_procedural_defects(case_data: Dict, timeline_data: Dict, liability_data
         'check': 'Check cheque number, amount, date, bank name match between complaint and actual cheque/memo'
     })
 
-    fatal_count = len(defect_scan['fatal_defects'])
+    fatal_count   = len(defect_scan['fatal_defects'])
+    curable_count = len(defect_scan.get('curable_defects', []))
+    _borderline   = [d for d in defect_scan.get('curable_defects', [])
+                     if d.get('severity') == 'HIGH' or 'same-day' in str(d.get('defect','')).lower()
+                     or 'borderline' in str(d.get('defect','')).lower()]
     if fatal_count >= 2:
-        defect_scan['overall_risk'] = 'CRITICAL - Multiple Fatal Defects'
+        defect_scan['overall_risk']     = 'CRITICAL — Multiple Fatal Defects'
+        defect_scan['risk_category']    = 'Clear Defect'
+        defect_scan['risk_description'] = 'Multiple fatal procedural defects — complaint will be dismissed at first hearing'
     elif fatal_count == 1:
-        defect_scan['overall_risk'] = 'HIGH - One Fatal Defect Present'
-    elif defect_scan['curable_defects']:
-        defect_scan['overall_risk'] = 'MEDIUM - Curable Defects Present'
+        defect_scan['overall_risk']     = 'HIGH — One Fatal Defect Present'
+        defect_scan['risk_category']    = 'Clear Defect'
+        defect_scan['risk_description'] = (
+            (defect_scan['fatal_defects'][0].get('defect') or 'Fatal procedural defect') +
+            ' — complaint is not maintainable in current form'
+        )
+    elif _borderline:
+        defect_scan['overall_risk']     = 'MEDIUM — Borderline Procedural Risk'
+        defect_scan['risk_category']    = 'Borderline Risk'
+        defect_scan['risk_description'] = (
+            'Procedurally valid but contains elements that some courts may treat as defective. '
+            'Legal review strongly recommended before filing.'
+        )
+    elif defect_scan.get('curable_defects'):
+        defect_scan['overall_risk']     = 'MEDIUM — Curable Defects Present'
+        defect_scan['risk_category']    = 'Borderline Risk'
+        defect_scan['risk_description'] = f'{curable_count} curable defect(s) identified — addressable before filing'
     else:
-        defect_scan['overall_risk'] = 'LOW - No Major Defects Detected'
+        defect_scan['overall_risk']     = 'LOW — No Procedural Defects Detected'
+        defect_scan['risk_category']    = 'No Defect'
+        defect_scan['risk_description'] = 'All procedural requirements appear satisfied based on available information'
 
     if defect_scan['fatal_defects']:
         defect_scan['remedies'].append({
@@ -5861,10 +5913,30 @@ def calculate_overall_risk_score(
         _prob_label   = 'Favourable — high likelihood of conviction'
         _prob_dismiss = '<20%'
         _prob_convict = '>80%'
+    # Likely court outcome with stage prediction
+    if _fatal or _score < 25:
+        _court_outcome = 'Complaint likely to be dismissed at threshold stage (Section 245 CrPC)'
+        _court_stage   = 'Pre-trial / threshold stage'
+        _court_action  = 'Accused can file discharge application at first hearing'
+    elif _score < 50:
+        _court_outcome = 'High risk of acquittal — significant evidentiary gaps'
+        _court_stage   = 'Trial stage'
+        _court_action  = 'Strengthen documentary evidence before filing'
+    elif _score < 70:
+        _court_outcome = 'Moderate chance of conviction — case viable but improvable'
+        _court_stage   = 'Trial stage'
+        _court_action  = 'Address documentary gaps and prepare strong examination-in-chief'
+    else:
+        _court_outcome = 'Strong case — high likelihood of conviction'
+        _court_stage   = 'Likely to proceed to conviction'
+        _court_action  = 'File complaint and apply for interim compensation under Section 143A'
     risk_model['outcome_probability'] = {
         'label':                  _prob_label,
         'dismissal_probability':  _prob_dismiss,
         'conviction_probability': _prob_convict,
+        'likely_outcome':         _court_outcome,
+        'court_stage':            _court_stage,
+        'recommended_action':     _court_action,
         'basis':                  'Based on statutory compliance score and fatal defect analysis',
     }
 
@@ -5872,6 +5944,45 @@ def calculate_overall_risk_score(
     # total_weighted is always defined above — use it directly
     _base = round(total_weighted, 1)
     _final = round(risk_model.get('overall_risk_score', 0), 1)
+    _cap_val = FATAL_CAP_UNIFIED if all_fatal_defects else None
+
+    # Build per-category contribution table
+    _contributions = []
+    for _cname, _cdata in (risk_model.get('category_scores') or {}).items():
+        if not isinstance(_cdata, dict): continue
+        _cs  = round(float(_cdata.get('score', 0) or 0), 1)
+        _cw  = float(_cdata.get('weight', 0) or 0)
+        _cwp = round(_cw * 100)
+        _contrib = round(_cs * _cw, 1)
+        _contributions.append({
+            'category':    _cname,
+            'score':       _cs,
+            'weight_pct':  _cwp,
+            'weight_float':_cw,
+            'contribution':_contrib,
+            'display':     f'{_cname} ({_cwp}%): {_cs}/100 → contributes {_contrib}',
+            'level':       'Strong' if _cs >= 70 else 'Moderate' if _cs >= 45 else 'Weak',
+        })
+    risk_model['score_contributions'] = _contributions
+
+    # Build traceable score trail: Base → Adjustments → Cap → Final
+    _adj_notes = []
+    if risk_model.get('jurisdiction_penalty'):
+        _adj_notes.append(f"Jurisdiction penalty: -{risk_model['jurisdiction_penalty']}")
+    if all_fatal_defects:
+        _adj_notes.append(f"Fatal override cap: {_base}/100 → {_final}/100")
+    risk_model['score_trail'] = {
+        'base_weighted_score':  _base,
+        'adjustments':          _adj_notes,
+        'cap_applied':          bool(all_fatal_defects),
+        'cap_value':            _cap_val,
+        'final_score':          _final,
+        'trail_display': (
+            f'Base: {_base}/100'
+            + (f' → Fatal cap applied → {_final}/100' if all_fatal_defects else f' → Final: {_final}/100')
+        ),
+    }
+
     # Always build score_cap_explanation — single source of truth
     risk_model['score_cap_explanation'] = {
         'base_score':         _base,
@@ -11317,13 +11428,20 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         # Recalculate overall_risk after propagation
         fatal_count = len(defect_result.get('fatal_defects', []))
         if fatal_count >= 2:
-            defect_result['overall_risk'] = 'CRITICAL - Multiple Fatal Defects'
+            defect_result['overall_risk']     = 'CRITICAL — Multiple Fatal Defects'
+            defect_result['risk_category']    = 'Clear Defect'
         elif fatal_count == 1:
-            defect_result['overall_risk'] = 'HIGH - One Fatal Defect Present'
+            defect_result['overall_risk']     = 'HIGH — One Fatal Defect Present'
+            defect_result['risk_category']    = 'Clear Defect'
+        elif any(d.get('severity') == 'HIGH' for d in defect_result.get('curable_defects', [])):
+            defect_result['overall_risk']     = 'MEDIUM — Borderline Procedural Risk'
+            defect_result['risk_category']    = 'Borderline Risk'
         elif defect_result.get('curable_defects'):
-            defect_result['overall_risk'] = 'MEDIUM - Curable Defects Present'
+            defect_result['overall_risk']     = 'MEDIUM — Curable Defects Present'
+            defect_result['risk_category']    = 'Borderline Risk'
         else:
-            defect_result['overall_risk'] = 'LOW - No Major Defects Detected'
+            defect_result['overall_risk']     = 'LOW — No Procedural Defects Detected'
+            defect_result['risk_category']    = 'No Defect'
 
         analysis_report['modules']['procedural_defects'] = defect_result
         analysis_report['architecture']['deterministic_modules'].append('Procedural Defects')
@@ -12128,6 +12246,34 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
                 'court_indices':         {k: str(v) for k,v in (_jud.get('behavioral_indices') or {}).items()},
                 # Next actions
                 'next_actions':          _next_actions,
+            # Action timing — urgency insight for lawyer
+            'action_required_within': (
+                f"{_refiling.get('days_remaining', 0)} days"
+                if isinstance(_refiling, dict) and _refiling.get('days_remaining', 0) > 0
+                else 'Immediately'
+            ),
+            'action_deadline':        (
+                _refiling.get('deadline_date', '')
+                if isinstance(_refiling, dict) else ''
+            ),
+            'urgency_note':           (
+                f"⚠️ Only {_refiling.get('days_remaining',0)} days left to refile — act immediately"
+                if isinstance(_refiling, dict) and 0 < _refiling.get('days_remaining',0) <= 7 else
+                f"File fresh complaint within {_refiling.get('days_remaining',0)} days"
+                if isinstance(_refiling, dict) and _refiling.get('days_remaining',0) > 7 else
+                ''
+            ),
+            # Analysis confidence
+            'analysis_confidence':    (
+                'HIGH' if len([m for m in [_tl, _ing, _doc, _risk] if m]) >= 4 else
+                'MEDIUM' if len([m for m in [_tl, _ing, _doc, _risk] if m]) >= 2 else
+                'LOW'
+            ),
+            'confidence_note': (
+                'All core modules executed — high confidence in analysis'
+                if len([m for m in [_tl, _ing, _doc, _risk] if m]) >= 4 else
+                'Some modules incomplete — review with qualified counsel'
+            ),
                 # Settlement
                 'cheque_amount':         case_data.get('cheque_amount', 0),
                 'settlement_recommended': bool(_sett.get('settlement_recommended')),
