@@ -3760,13 +3760,13 @@ def analyze_timeline(case_data: Dict) -> Dict:
                 })
 
             elif complaint_filed_date == cause_of_action:
-                # ── SAME-DAY FILING: borderline / legally risky ──
+                # ── SAME-DAY FILING: borderline / HIGH risk (NOT critical/fatal) ──
                 timeline_analysis['compliance_status']['limitation'] = (
                     f'⚠️ SAME-DAY FILING — complaint filed on exact date of cause of action '
-                    f'({cause_of_action.strftime("%Y-%m-%d")}). High dismissal risk.'
+                    f'({cause_of_action.strftime("%Y-%m-%d")}). Procedural risk — interpretation dependent.'
                 )
-                timeline_analysis['limitation_risk'] = 'CRITICAL'
-                timeline_analysis['score'] = 20   # same-day is high risk, effectively critical
+                timeline_analysis['limitation_risk'] = 'HIGH'   # NOT CRITICAL — same-day is borderline, not fatal
+                timeline_analysis['score'] = 55   # within limitation — score penalty applied separately
                 timeline_analysis['cause_of_action_reasoning'] = (
                     f'Cause of action under Section 138 arises at expiry of 15-day notice period '
                     f'({cause_of_action.strftime("%d %b %Y")}). Complaint filed on the SAME DAY '
@@ -5876,13 +5876,17 @@ def calculate_overall_risk_score(
             })
         elif _is_same_day:
             # Same-day filing: HIGH risk, interpretation-dependent, NOT fatal
-            # Do NOT add to all_fatal_defects — handle as score penalty only
-            _same_day_penalty = round(total_weighted * 0.15, 1)  # 15% penalty
+            # Do NOT add to all_fatal_defects — apply score penalty only
+            _same_day_penalty = round(total_weighted * 0.12, 1)  # 12% penalty
             risk_model['overall_risk_score'] = round(
-                max(20, risk_model.get('overall_risk_score', total_weighted) - _same_day_penalty), 1
+                max(35, (risk_model.get('overall_risk_score') or total_weighted) - _same_day_penalty), 1
             )
             risk_model['same_day_filing_penalty'] = _same_day_penalty
             risk_model['same_day_filing_risk'] = 'HIGH — interpretation-dependent procedural risk'
+            # Ensure it never enters all_fatal_defects
+            all_fatal_defects = [d for d in all_fatal_defects 
+                                 if 'same-day' not in str(d.get('defect','')).lower()
+                                 and 'same day' not in str(d.get('defect','')).lower()]
         # else: other CRITICAL timeline issues — add as fatal
         else:
             all_fatal_defects.append({
@@ -7357,6 +7361,7 @@ def analyze_territorial_jurisdiction(case_data: Dict) -> Dict:
     analysis = {
         'module': 'Section 142 Territorial Jurisdiction Analysis',
         'jurisdiction_valid': True,
+        'jurisdiction_note': 'Jurisdiction assessment based on court/bank location data',
         'filing_court': None,
         'valid_jurisdictions': [],
         'jurisdiction_basis': [],
@@ -7436,6 +7441,7 @@ def analyze_territorial_jurisdiction(case_data: Dict) -> Dict:
             if not jurisdiction_matches:
                 analysis['jurisdiction_valid'] = False
                 analysis['risk_level'] = 'CRITICAL'
+                analysis['jurisdiction_note'] = 'Court may lack jurisdiction — file where cheque was presented/dishonoured'
                 analysis['recommendations'].append({
                     'priority': 'CRITICAL',
                     'issue': 'Territorial jurisdiction may be invalid',
@@ -7911,16 +7917,31 @@ def generate_executive_summary(
     case_type  = "Complainant" if case_data.get('case_type') == 'complainant' else "Accused"
 
     # ── Collect ALL fatal defects from all modules ──
+    # Collect REAL fatal defects — exclude same-day filing (HIGH risk, not fatal)
     all_fatals = []
-    all_fatals.extend(risk_data.get('fatal_defects', []) or [])
-    all_fatals.extend(defect_data.get('fatal_defects', []) or [])
-    all_fatals.extend(ingredient_data.get('fatal_defects', []) or [])
+    for _src in [risk_data.get('fatal_defects', []) or [],
+                  defect_data.get('fatal_defects', []) or [],
+                  ingredient_data.get('fatal_defects', []) or []]:
+        for _d in _src:
+            _defect_text = str(_d.get('defect', '')).lower()
+            _sev = _d.get('severity', '')
+            # Skip same-day filing — it's HIGH risk, not a fatal legal bar
+            if 'same-day' in _defect_text or 'same day' in _defect_text:
+                continue
+            # Skip items explicitly marked as non-absolute
+            if _d.get('is_absolute') is False:
+                continue
+            # Only include FATAL/CRITICAL severity
+            if _sev not in ('FATAL', 'CRITICAL', ''):
+                continue
+            all_fatals.append(_d)
     seen, unique_fatals = set(), []
     for d in all_fatals:
         k = d.get('defect', str(d))
         if k not in seen:
             seen.add(k)
             unique_fatals.append(d)
+    unique_fatals = deduplicate_fatal_defects(unique_fatals)
 
     fatal_flag = len(unique_fatals) > 0
 
@@ -12138,11 +12159,21 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         # FATAL CHECKPOINT 1: Timeline
         # NOTE: We do NOT return early here. We set fatal_flag and CONTINUE
         # so ALL modules execute and the full report is complete.
-        if timeline_result.get('limitation_risk') in ['EXPIRED', 'CRITICAL']:
+        _tl_lim_risk = timeline_result.get('limitation_risk', 'LOW')
+        _tl_lim_text = str((timeline_result.get('compliance_status') or {}).get('limitation', ''))
+        _tl_is_same_day = 'SAME-DAY' in _tl_lim_text.upper() or 'SAME DAY' in _tl_lim_text.upper()
+        _tl_is_genuinely_fatal = (
+            _tl_lim_risk in ['EXPIRED', 'CRITICAL'] and
+            not _tl_is_same_day  # same-day is HIGH, not fatal
+        )
+        if _tl_is_genuinely_fatal:
             analysis_report['fatal_flag'] = True
             analysis_report['fatal_source'] = 'timeline_intelligence'
             analysis_report['fatal_type'] = 'LIMITATION_EXPIRED'
-            logger.warning(f"🔴 FATAL TIMELINE: {timeline_result.get('limitation_risk')} — continuing all modules for complete report")
+            logger.warning(f"🔴 FATAL TIMELINE: {_tl_lim_risk} — premature/time-barred — continuing all modules")
+        elif _tl_is_same_day:
+            analysis_report['same_day_filing'] = True  # flag for downstream modules
+            logger.info("⚠️ Same-day filing detected — HIGH risk, not fatal — continuing all modules")
 
         doc_compliance = analyze_document_compliance(case_data)
         analysis_report['modules']['document_compliance'] = doc_compliance
@@ -12480,9 +12511,13 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         analysis_report['modules']['risk_assessment'] = risk_result
         analysis_report['architecture']['deterministic_modules'].append('Risk Scoring')
 
-        if risk_result.get('has_fatal_defects', False) or len(risk_result.get('fatal_defects', [])) > 0:
+        _risk_fatals = [d for d in (risk_result.get('fatal_defects') or [])
+                        if d.get('severity') in ('FATAL', 'CRITICAL')
+                        and 'same-day' not in str(d.get('defect','')).lower()
+                        and 'same day' not in str(d.get('defect','')).lower()]
+        if _risk_fatals:
             analysis_report['fatal_flag'] = True
-            logger.warning("🔴 FATAL DEFECTS DETECTED - Score capped")
+            logger.warning(f"🔴 FATAL DEFECTS DETECTED ({len(_risk_fatals)}) - Score capped")
 
         logger.info("  Module 8: Settlement Analysis...")
         settlement_result = analyze_settlement_exposure(case_data, risk_result)
@@ -13142,13 +13177,29 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
             _jud    = analysis_report.get('modules', {}).get('judicial_behavior', {}) or {}
             _pres   = analysis_report.get('modules', {}).get('presumption_analysis', {}) or {}
             _sett   = analysis_report.get('modules', {}).get('settlement_analysis', {}) or {}
-            _is_fatal = bool(analysis_report.get('fatal_flag'))
+            # _is_fatal = True ONLY if genuinely fatal defects (not same-day)
+            _raw_fatal_flag = bool(analysis_report.get('fatal_flag'))
+            # Check if the ONLY reason for fatal_flag is same-day filing
+            _real_fatals_in_report = [d for d in (_risk.get('fatal_defects') or [])
+                                   if 'same-day' not in str(d.get('defect','')).lower()
+                                   and 'same day' not in str(d.get('defect','')).lower()
+                                   and d.get('is_absolute') is not False
+                                   and d.get('severity') in ('FATAL','CRITICAL','')]
+            _is_fatal = bool(_real_fatals_in_report) or (
+            _raw_fatal_flag and not analysis_report.get('same_day_filing')
+            )
     
-            # Collect ALL fatal defects from all modules — deduplicated
-            _all_fatals = []
-            _all_fatals += (_risk.get('fatal_defects') or [])
-            _all_fatals += (_def.get('fatal_defects') or [])
-            _all_fatals += (_ing.get('fatal_defects') or [])
+            # Collect REAL fatal defects — same-day excluded (it's HIGH not FATAL)
+            _all_fatals = [
+                d for _src in [
+                    (_risk.get('fatal_defects') or []),
+                    (_def.get('fatal_defects') or []),
+                    (_ing.get('fatal_defects') or []),
+                ] for d in _src
+                if 'same-day' not in str(d.get('defect','')).lower()
+                and 'same day' not in str(d.get('defect','')).lower()
+                and d.get('is_absolute') is not False
+            ]
             _seen_f, _uniq_f = set(), []
             for _fd in _all_fatals:
                 _k = _fd.get('defect', str(_fd))
@@ -13164,11 +13215,36 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
                 except: return fb
     
             # Fatal override display — the "Capped at undefined" fix
-            _orig_score  = round(_risk.get('overall_risk_score', 0), 1)
+            # ── CLEAN SCORE PIPELINE ────────────────────────────────────
+            # Step 1: Get the base weighted score (always > 0 if modules ran)
+            _score_trail   = _risk.get('score_trail') or {}
+            _base_weighted = round(float(_score_trail.get('base_weighted_score') or
+                                         _risk.get('score_cap_explanation', {}).get('base_score') or
+                                         0), 1)
+            # Step 2: Get the final score (after any caps/overrides)
+            _orig_score    = round(float(_risk.get('overall_risk_score') or 0), 1)
+            # Step 3: If final=0 but base>0, recover — something went wrong in the cap logic
+            if _orig_score == 0 and _base_weighted > 0:
+                _has_abs_fatal = any(
+                    d.get('severity') in ('FATAL','CRITICAL') and
+                    d.get('is_absolute') is not False and
+                    'same-day' not in str(d.get('defect','')).lower()
+                    for d in (_risk.get('fatal_defects') or [])
+                )
+                if _has_abs_fatal:
+                    _orig_score = round(min(_base_weighted, 25), 1)  # cap to 25, never 0
+                else:
+                    _orig_score = _base_weighted  # no real fatal — restore full score
+            # Step 4: Get override details
             _fdo         = _risk.get('fatal_defect_override', {}) or _risk.get('hard_fatal_override', {}) or {}
-            _orig_before = round(_fdo.get('original_score', _fdo.get('original_weighted_score', _orig_score)), 1)
-            _cap_val     = round(_fdo.get('capped_at', _fdo.get('overridden_score', _orig_score)), 1)
+            _orig_before = round(float(_fdo.get('original_score') or
+                                        _fdo.get('original_weighted_score') or
+                                        _base_weighted or _orig_score), 1)
+            _cap_val     = round(float(_fdo.get('capped_at') or
+                                        _fdo.get('overridden_score') or
+                                        _orig_score), 1)
             _cap_display = f"{_cap_val}/100"
+            # ────────────────────────────────────────────────────────────
     
             # Processing time — guaranteed string, never "undefineds"
             # _pt_secs and _pt_str now computed in derived fields block above
