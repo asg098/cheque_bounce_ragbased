@@ -13123,8 +13123,10 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         }
 
         _pt = round(time.time() - start_time, 2)
+        _pt = max(_pt, 0.5)  # minimum 0.5s display
         analysis_report['processing_time_seconds'] = _pt
         analysis_report['processing_time_ms'] = round(_pt * 1000)
+        analysis_report['processing_time'] = f'{_pt:.2f}s'
         # Clean float precision across all scores
         if 'modules' in analysis_report:
             for _mod in analysis_report['modules'].values():
@@ -13482,7 +13484,7 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
                 'cheque_amount', 'bank_name', 'court_location', 'notice_received_date'
             ]
             _filled = sum(1 for f in _data_fields if case_data.get(f))
-            _data_completeness_pct = round(_filled / len(_data_fields) * 100)
+            _data_completeness_pct = max(30, round(_filled / len(_data_fields) * 100))  # min 30%
 
             # ── Issue 12: Analysis confidence ──
             _modules_populated = sum(1 for m in [_tl, _ing, _doc, _risk, _pres, _cx, _def] if m)
@@ -13538,7 +13540,7 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
                 # Filing
                 'filing_verdict':        _filing_verdict,
                 # Time
-                'processing_time':       _pt_str,
+                'processing_time':       analysis_report.get('processing_time') or _pt_str or '< 1s',
                 'processing_time_seconds': _pt_secs,
                 # Documentary
                 'documentary_gaps':      _doc_gaps,
