@@ -13400,14 +13400,9 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
             _score_cap           = _risk.get('score_cap_explanation') or {}
             _base_score_display  = round(float(_score_cap.get('base_score', _orig_before) or _orig_before), 1)
 
-            # ── Issue 2/3/5/6: Same-day filing is HIGH RISK not FATAL ──
-            # Re-classify same-day filing to avoid over-aggressive fatal marking
-            _same_day_filing = any(
-                'same-day' in str(d.get('defect','')).lower() or
-                'same day' in str(d.get('defect','')).lower() or
-                'same date' in str(d.get('defect','')).lower()
-                for d in _uniq_f
-            )
+            # ── Same-day filing: use the flag set by timeline checkpoint ──
+            # (Do NOT read from _uniq_f — same-day is already filtered out of it)
+            _same_day_filing = bool(analysis_report.get('same_day_filing', False))
             if _same_day_filing:
                 # Move same-day from fatal to high-risk — it's interpretational, not absolute
                 _uniq_f_real_fatal = [d for d in _uniq_f if 'same-day' not in str(d.get('defect','')).lower()
