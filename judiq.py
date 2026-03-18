@@ -5859,13 +5859,39 @@ def calculate_overall_risk_score(
             'impact': 'Case will be dismissed on technical grounds'
         })
     elif timeline_data.get('limitation_risk') == 'CRITICAL':
-        all_fatal_defects.append({
-            'category': 'Timeline',
-            'defect': 'Critical limitation violation',
-            'defect_type': 'complaint_beyond_30_days',
-            'severity': 'FATAL',
-            'impact': 'Dismissal risk substantial'
-        })
+        # Only add as FATAL if genuinely time-barred or premature — NOT same-day filing
+        _tl_limit_text = str((timeline_data.get('compliance_status') or {}).get('limitation', ''))
+        _is_same_day   = 'SAME-DAY' in _tl_limit_text.upper() or 'SAME DAY' in _tl_limit_text.upper()
+        _is_premature  = 'PREMATURE' in _tl_limit_text.upper()
+        _is_timebarred = 'BARRED' in _tl_limit_text.upper() or 'EXPIRED' in _tl_limit_text.upper()
+        if _is_timebarred or _is_premature:
+            # Genuinely fatal — complaint filed before COA or time-barred
+            all_fatal_defects.append({
+                'category': 'Timeline',
+                'defect': 'Premature Complaint — Cause of Action Not Yet Arisen' if _is_premature else 'Complaint Barred by Limitation',
+                'defect_type': 'premature_complaint' if _is_premature else 'complaint_beyond_30_days',
+                'severity': 'FATAL',
+                'impact': 'Complaint is not maintainable — will be dismissed at first hearing' if _is_premature else 'Complaint is time-barred — condonation required',
+                'is_absolute': True,
+            })
+        elif _is_same_day:
+            # Same-day filing: HIGH risk, interpretation-dependent, NOT fatal
+            # Do NOT add to all_fatal_defects — handle as score penalty only
+            _same_day_penalty = round(total_weighted * 0.15, 1)  # 15% penalty
+            risk_model['overall_risk_score'] = round(
+                max(20, risk_model.get('overall_risk_score', total_weighted) - _same_day_penalty), 1
+            )
+            risk_model['same_day_filing_penalty'] = _same_day_penalty
+            risk_model['same_day_filing_risk'] = 'HIGH — interpretation-dependent procedural risk'
+        # else: other CRITICAL timeline issues — add as fatal
+        else:
+            all_fatal_defects.append({
+                'category': 'Timeline',
+                'defect': 'Critical limitation violation',
+                'defect_type': 'complaint_beyond_30_days',
+                'severity': 'FATAL',
+                'impact': 'Dismissal risk substantial'
+            })
 
     if ingredient_data.get('fatal_defects'):
         for defect in ingredient_data['fatal_defects']:
@@ -6085,16 +6111,30 @@ def calculate_overall_risk_score(
     fatal_defect_override = False
     override_reason = []
 
+    # Only count GENUINELY fatal procedural defects (not same-day / borderline / HIGH)
     procedural_fatal_count = len([d for d in defect_data.get('fatal_defects', [])
-                                   if d.get('severity') in ['CRITICAL', 'HIGH']])
+                                   if d.get('severity') in ['CRITICAL', 'FATAL']
+                                   and 'same-day' not in str(d.get('defect','')).lower()
+                                   and 'same day' not in str(d.get('defect','')).lower()
+                                   and 'borderline' not in str(d.get('defect','')).lower()])
+    procedural_high_count = len([d for d in defect_data.get('curable_defects', [])
+                                  if d.get('severity') == 'HIGH'])
     if procedural_fatal_count >= 2:
         fatal_defect_override = True
-        override_reason.append(f'{procedural_fatal_count} critical procedural defects - technical dismissal likely')
+        override_reason.append(f'{procedural_fatal_count} fatal procedural defects — technical dismissal likely')
         risk_model['overall_risk_score'] = min(risk_model['overall_risk_score'], 30)
-    elif procedural_fatal_count == 1 and defect_data['overall_risk'].startswith('CRITICAL'):
+    elif procedural_fatal_count == 1 and (defect_data.get('overall_risk', '').startswith('CRITICAL')
+                                           or defect_data.get('overall_risk', '').startswith('HIGH')):
         fatal_defect_override = True
-        override_reason.append('Critical procedural defect detected')
+        override_reason.append('Fatal procedural defect detected')
         risk_model['overall_risk_score'] = min(risk_model['overall_risk_score'], 40)
+    elif procedural_high_count >= 1:
+        # HIGH risk procedural (e.g. same-day) — apply moderate reduction, not hard cap
+        _high_reduction = round(risk_model.get('overall_risk_score', 0) * 0.20, 1)
+        risk_model['overall_risk_score'] = round(
+            max(25, risk_model.get('overall_risk_score', 0) - _high_reduction), 1
+        )
+        override_reason.append(f'High procedural risk — {_high_reduction:.1f} point reduction applied')
 
     if fatal_defect_override:
         _capped_at = risk_model['overall_risk_score']
@@ -7557,6 +7597,11 @@ def analyze_director_role_liability(case_data: Dict) -> Dict:
 
     if not is_company_case:
         analysis['is_company_case'] = False
+        analysis['applicable'] = False
+        analysis['properly_impleaded'] = True
+        analysis['risk_level'] = 'LOW'
+        analysis['explanation'] = 'Not a company case — Section 141 director liability not applicable. Individual drawer is solely liable.'
+        analysis['recommendation'] = 'N/A — no director impleading required'
         return analysis
 
     analysis['is_company_case'] = True
@@ -11086,11 +11131,21 @@ def analyze_dishonour_reason(case_data: Dict) -> Dict:
     }
 
     if not reason or reason == 'not specified':
-        result['legal_impact']   = 'Dishonour reason not provided — weakens the case'
-        result['recommendation'] = 'Obtain dishonour memo from bank clearly stating the reason'
-        result['risk_level']     = 'HIGH'
-        result['score_impact']   = -10
-        return result
+        # Try alternate field names
+        alt_reason = (
+            str(case_data.get('return_reason') or '').lower() or
+            str(case_data.get('bounce_reason') or '').lower() or
+            str(case_data.get('dishonour_memo_reason') or '').lower()
+        )
+        if alt_reason:
+            reason = alt_reason
+            result['raw_reason'] = alt_reason
+        else:
+            result['legal_impact']   = 'Dishonour reason not provided — weakens the case'
+            result['recommendation'] = 'Obtain dishonour memo from bank clearly stating the reason'
+            result['risk_level']     = 'HIGH'
+            result['score_impact']   = -10
+            return result
 
     if any(k in reason for k in ['insufficient', 'funds', 'balance', 'exceeds']):
         result['reason_category'] = 'Insufficient Funds'
@@ -13207,15 +13262,27 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
                 f"Based on cases from {_jud_court}. Confidence: {_jud_conf}."
             )
     
-            # Filing verdict
-            if _is_fatal:
-                _filing_verdict = "DO NOT FILE — FATAL DEFECTS PRESENT"
+            # Filing verdict — same-day is HIGH RISK not DO NOT FILE
+            _has_real_fatal = any(
+                d.get('severity') in ('FATAL','CRITICAL') and
+                'same-day' not in str(d.get('defect','')).lower() and
+                'same day' not in str(d.get('defect','')).lower() and
+                d.get('is_absolute', True) is not False
+                for d in _uniq_f
+            )
+            if _same_day_filing and not _has_real_fatal:
+                _is_fatal = False  # same-day is not an absolute fatal
+                _filing_verdict = ('FILE WITH CAUTION — SAME-DAY PROCEDURAL RISK'
+                                   if _orig_score >= 55 else
+                                   'HIGH RISK — SAME-DAY FILING + EVIDENCE GAPS')
+            elif _has_real_fatal or _is_fatal:
+                _filing_verdict = 'DO NOT FILE — FATAL DEFECTS PRESENT'
             elif _orig_score >= 75:
-                _filing_verdict = "READY TO FILE — STRONG CASE"
+                _filing_verdict = 'READY TO FILE — STRONG CASE'
             elif _orig_score >= 55:
-                _filing_verdict = "FILE WITH CAUTION — EVIDENCE GAPS PRESENT"
+                _filing_verdict = 'FILE WITH CAUTION — EVIDENCE GAPS PRESENT'
             else:
-                _filing_verdict = "HIGH RISK — REMEDIATION REQUIRED BEFORE FILING"
+                _filing_verdict = 'HIGH RISK — REMEDIATION REQUIRED BEFORE FILING'
     
             # ── Categorize issues by severity (Fix 2) ──────────────
             _fatal_issues    = [d for d in _uniq_f if d.get('severity','') in ('CRITICAL','FATAL')]
@@ -13276,21 +13343,42 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
             _tl_limitation_status = str((_tl.get('compliance_status') or {}).get('limitation', ''))
             _tl_limitation_risk_raw = _tl.get('limitation_risk', 'LOW')
             # If timeline says compliant but risk is CRITICAL — use timeline's own status
-            if ('WITHIN' in _tl_limitation_status.upper() or 'COMPLIANT' in _tl_limitation_status.upper()):
-                _limitation_risk_display = 'LOW'
-            elif 'SAME-DAY' in _tl_limitation_status.upper():
-                _limitation_risk_display = 'HIGH — Same-day filing (interpretation dependent)'
+            # Limitation risk = ONLY timeline date compliance, not procedural issues
+            if 'SAME-DAY' in _tl_limitation_status.upper():
+                _limitation_risk_display = 'LOW — Filed within limitation period'
+                # Same-day is procedural risk, NOT a limitation period violation
+            elif ('WITHIN' in _tl_limitation_status.upper() or 'COMPLIANT' in _tl_limitation_status.upper()):
+                _limitation_risk_display = 'LOW — Filed within limitation period'
             elif 'PREMATURE' in _tl_limitation_status.upper():
-                _limitation_risk_display = 'CRITICAL — Filed before cause of action'
-            elif 'BARRED' in _tl_limitation_status.upper():
-                _limitation_risk_display = 'CRITICAL — Time-barred'
+                _limitation_risk_display = 'CRITICAL — Filed before cause of action arose'
+            elif 'BARRED' in _tl_limitation_status.upper() or 'EXPIRED' in _tl_limitation_status.upper():
+                _limitation_risk_display = 'CRITICAL — Complaint barred by limitation (Section 142)'
+            elif _tl_limitation_risk_raw in ('CRITICAL', 'HIGH'):
+                _limitation_risk_display = f'{_tl_limitation_risk_raw} — Limitation compliance issue'
             else:
-                _limitation_risk_display = _tl_limitation_risk_raw
+                _limitation_risk_display = 'LOW — Filed within limitation period'
 
-            # ── Issue 1: Single consistent score source ──
-            # _orig_score is the final score — ensure it's never 0 if base was valid
-            if _orig_score == 0 and _orig_before > 0 and not _uniq_f:
-                _orig_score = _orig_before  # no fatal — restore base score
+            # ── Score consistency: single clean pipeline ──
+            # _orig_score = what risk module computed as final (after fatal override)
+            # _orig_before = base weighted score before any cap
+            # Rule: if _orig_score is 0 but _orig_before is valid, something went wrong — recover
+            if _orig_score == 0 and _orig_before > 0:
+                if not _uniq_f:
+                    # No fatals at all — restore to base
+                    _orig_score = _orig_before
+                elif all(d.get('severity') not in ('FATAL', 'CRITICAL') for d in _uniq_f):
+                    # Only HIGH/MEDIUM defects — restore to base with penalty
+                    _orig_score = round(_orig_before * 0.65, 1)
+            # Ensure score never shows as 0.0 unless truly fatal case with no base
+            if _orig_score == 0 and _orig_before == 0:
+                # Try to get from category scores
+                _cats_recover = _risk.get('category_scores') or {}
+                if _cats_recover:
+                    _orig_score = round(sum(
+                        float(v.get('score', 0) or 0) * float(v.get('weight', 0) or 0)
+                        for v in _cats_recover.values() if isinstance(v, dict)
+                    ), 1)
+                    _orig_before = _orig_score
 
             # ── Issue 11: Processing time ──
             _pt_secs  = analysis_report.get('processing_time_seconds') or 0
