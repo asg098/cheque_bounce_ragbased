@@ -55,9 +55,11 @@ def indian_number_format(amount: float) -> str:
 
 
 def add_calendar_months(start_date, months: int):
-
     if isinstance(start_date, str):
-        start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+        try:
+            start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+        except (ValueError, TypeError):
+            raise ValueError(f"Invalid date format '{start_date}' — expected YYYY-MM-DD")
     return start_date + relativedelta(months=months)
 
 
@@ -65,7 +67,10 @@ def add_calendar_months(start_date, months: int):
 def calculate_cheque_expiry(cheque_date):
 
     if isinstance(cheque_date, str):
-        cheque_date = datetime.strptime(cheque_date, '%Y-%m-%d').date()
+        try:
+            cheque_date = datetime.strptime(cheque_date, '%Y-%m-%d').date()
+        except (ValueError, TypeError):
+            raise ValueError(f"Invalid cheque_date '{cheque_date}' — expected YYYY-MM-DD")
     expiry = add_calendar_months(cheque_date, 3)
     days_to_expiry = (expiry - cheque_date).days
     return expiry, days_to_expiry
@@ -84,7 +89,10 @@ def get_cause_of_action(notice_service_date, notice_status='delivered'):
         Tuple of (cause_of_action_date, explanation)
     """
     if isinstance(notice_service_date, str):
-        notice_service_date = datetime.strptime(notice_service_date, '%Y-%m-%d').date()
+        try:
+            notice_service_date = datetime.strptime(notice_service_date, '%Y-%m-%d').date()
+        except (ValueError, TypeError):
+            raise ValueError(f"Invalid notice_service_date '{notice_service_date}' — expected YYYY-MM-DD")
 
     # For all cases (delivered, refused, unclaimed), 15 days start from service date
     cause_of_action = notice_service_date + timedelta(days=15)
@@ -127,7 +135,11 @@ def format_timeline_transparency(timeline_data: Dict) -> Dict:
         dates = timeline_data['dates']
 
         if 'dishonour_date' in dates:
-            dishonour = datetime.strptime(dates['dishonour_date'], '%Y-%m-%d').date()
+            try:
+                dishonour = datetime.strptime(dates['dishonour_date'], '%Y-%m-%d').date()
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid dishonour_date format: {dates['dishonour_date']}")
+                return transparent_timeline
 
             notice_deadline = add_calendar_months(dishonour, 1)
             transparent_timeline['critical_deadlines']['notice_deadline'] = {
@@ -527,11 +539,12 @@ def analyze_judicial_behavior_fallback(court_location: Optional[str], kb_results
         if any(word in text for word in ['settlement', 'compound', '147', 'mutual']):
             settlement_count += 1
 
-    limitation_strictness = min(10.0, 3.0 + (limitation_strict_count / len(kb_results)) * 7.0)
-    technical_tendency = min(10.0, 2.0 + (technical_dismissal_count / len(kb_results)) * 8.0)
-    presumption_reliance = min(10.0, 5.0 + (presumption_count / len(kb_results)) * 5.0)
-    settlement_friendly = min(10.0, 4.0 + (settlement_count / len(kb_results)) * 6.0)
-    procedural_formality = min(10.0, 4.0 + (technical_dismissal_count / len(kb_results)) * 6.0)
+    _kb_n = len(kb_results) or 1  # guard against empty kb_results
+    limitation_strictness = min(10.0, 3.0 + (limitation_strict_count / _kb_n) * 7.0)
+    technical_tendency = min(10.0, 2.0 + (technical_dismissal_count / _kb_n) * 8.0)
+    presumption_reliance = min(10.0, 5.0 + (presumption_count / _kb_n) * 5.0)
+    settlement_friendly = min(10.0, 4.0 + (settlement_count / _kb_n) * 6.0)
+    procedural_formality = min(10.0, 4.0 + (technical_dismissal_count / _kb_n) * 6.0)
 
     behavior_analysis['behavioral_indices'] = {
         'limitation_strictness': round(limitation_strictness, 1),
@@ -1541,7 +1554,7 @@ def compute_unified_timeline(case_data: Dict) -> Dict:
                         timeline_obj['dates'][field] = case_data[field].isoformat()
                     else:
                         timeline_obj['dates'][field] = str(case_data[field])
-                except:
+                except Exception:
                     pass
 
         dates = timeline_obj['dates']
@@ -1550,7 +1563,7 @@ def compute_unified_timeline(case_data: Dict) -> Dict:
         for field, date_str in dates.items():
             try:
                 parsed_dates[field] = datetime.strptime(date_str, '%Y-%m-%d').date()
-            except:
+            except (ValueError, TypeError):
                 pass
 
         if 'cheque_date' in parsed_dates and 'dishonour_date' in parsed_dates:
@@ -1874,7 +1887,7 @@ def simulate_judicial_variance(base_score: float, category_scores: Dict) -> Dict
         'variance_range': round(variance_range, 1),
         'min_score': min(scores),
         'max_score': max(scores),
-        'mean_score': round(sum(scores) / len(scores), 1),
+        'mean_score': round(sum(scores) / len(scores), 1) if scores else 0,
         'interpretation': interpretation
     }
 
@@ -2551,6 +2564,25 @@ class CaseAnalysisRequest(BaseModel):
         description="Date printed on the cheque (YYYY-MM-DD). Must be within 3 months of presentation.",
         examples=["2026-01-15"]
     )
+
+    @field_validator('cheque_date', 'dishonour_date', 'notice_date', 'complaint_filed_date',
+                     'notice_received_date', 'transaction_date', 'presentation_date',
+                     'cause_of_action_date', 'notice_sent_verified_date',
+                     mode='before')
+    @classmethod
+    def validate_date_format(cls, v):
+        if v is None or v == '':
+            return v
+        if isinstance(v, str):
+            import re as _re
+            if not _re.match(r'^\d{4}-\d{2}-\d{2}$', v.strip()):
+                raise ValueError(f"Date '{v}' must be in YYYY-MM-DD format")
+            try:
+                from datetime import datetime as _dt
+                _dt.strptime(v.strip(), '%Y-%m-%d')
+            except ValueError:
+                raise ValueError(f"Date '{v}' is not a valid calendar date")
+        return v
     bank_name: str = Field(
         ...,
         description="Name of the bank on which the cheque was drawn",
@@ -2745,7 +2777,7 @@ class CaseAnalysisRequest(BaseModel):
 
     @field_validator('cheque_date', 'transaction_date', 'dishonour_date', 'notice_date', 'complaint_filed_date', mode='before')
     @classmethod
-    def validate_date_format(cls, v):
+    def validate_date_format_v2(cls, v):
         if v:
             try:
                 datetime.strptime(v, '%Y-%m-%d')
@@ -2839,6 +2871,7 @@ llm_loaded = False
 kb_data = None
 kb_embeddings = None
 kb_loaded = False
+_kb_lock = threading.Lock()  # thread-safe kb_loaded mutations
 court_behavior_db = None
 embed_lock = threading.Lock()
 llm_lock = threading.Lock()
@@ -3183,7 +3216,8 @@ def load_kb():
                 df = pd.read_csv(kb_local_path)
                 if len(df) > 1:
                     kb_data = df
-                    kb_loaded = True
+                    with _kb_lock:
+                        kb_loaded = True
                     print(f"✅ KB loaded from local cache: {len(df)} rows ({age_hours:.1f}h old)")
                     return True
             except Exception as e:
@@ -3198,7 +3232,8 @@ def load_kb():
                 df = pd.read_csv(kb_local_path)
                 if len(df) > 1:
                     kb_data = df
-                    kb_loaded = True
+                    with _kb_lock:
+                        kb_loaded = True
                     print(f"✅ KB loaded from Google Drive: {len(df)} rows")
 
                     # Compute and save court statistics to DB
@@ -3223,7 +3258,8 @@ def load_kb():
 
     # ── Step 3: Minimal fallback ──
     kb_data = _minimal_kb_fallback()
-    kb_loaded = False
+    with _kb_lock:
+        kb_loaded = False
     return False
 
 
@@ -3539,8 +3575,12 @@ def analyze_timeline(case_data: Dict) -> Dict:
                 })
             else:
 
-                cheque_date_obj = datetime.strptime(case_data['cheque_date'], '%Y-%m-%d').date()
-                expiry_date, validity_days = calculate_cheque_expiry(cheque_date_obj)
+                try:
+                    cheque_date_obj = cheque_date  # already parsed above
+                    expiry_date, validity_days = calculate_cheque_expiry(cheque_date_obj)
+                except (ValueError, TypeError):
+                    logger.warning('Invalid cheque_date for expiry calc')
+                    expiry_date, validity_days = None, 90
                 timeline_analysis['calculation_log'].append({
                     'rule': 'Cheque Validity (Current)',
                     'formula': f'Cheque Date + {validity_days} days',
@@ -3893,7 +3933,7 @@ def analyze_timeline(case_data: Dict) -> Dict:
 
     required_fields = ['cheque_date', 'dishonour_date', 'notice_date', 'complaint_filed_date']
     provided_fields = sum([1 for f in required_fields if case_data.get(f)])
-    data_completeness = (provided_fields / len(required_fields)) * 100
+    data_completeness = (provided_fields / len(required_fields)) * 100 if required_fields else 0
 
     timeline_analysis['confidence'] = calculate_confidence(
         data_completeness=data_completeness,
@@ -3953,8 +3993,8 @@ def analyze_ingredients(case_data: Dict, timeline_data: Dict) -> Dict:
                     'severity': severity,
                     'explanation': 'If debt is >3 years old without acknowledgment, it may be time-barred under Limitation Act'
                 })
-        except:
-            pass
+        except Exception as _e:
+            logger.debug(f'Defence calc: {_e}')
 
     if case_data.get('defence_type') == 'security_cheque':
         deduction = weights['debt']
@@ -4161,7 +4201,7 @@ def analyze_ingredients(case_data: Dict, timeline_data: Dict) -> Dict:
     scores.append(ing7_score)
 
     # Calculate overall compliance and apply universal cap
-    ingredients['overall_compliance'] = sum(scores) / len(scores)
+    ingredients['overall_compliance'] = sum(scores) / len(scores) if scores else 0
     ingredients['overall_compliance'] = cap_score_realistic(ingredients['overall_compliance'], max_cap=98.0)
 
     ingredient_rankings = sorted(
@@ -4724,8 +4764,8 @@ def analyze_liability_exposure(case_data: Dict, timeline_data: Dict, ingredient_
                     cross_exam_analysis['likely_questions'].append(
                         f'Why did accused give cheque {gap_months:.0f} months after transaction?'
                     )
-            except:
-                pass
+            except (ValueError, TypeError) as _e:
+                logger.debug(f'Cross-exam date: {_e}')
 
         cross_exam_analysis['likely_questions'].extend([
             'Have you shown this transaction in your income tax return?',
@@ -5162,8 +5202,11 @@ def analyze_accused_liability(case_data: Dict) -> Dict:
                     # CRITICAL: Resignation Date Check (ENHANCED)
                     resignation_date = director.get('resignation_date')
                     if resignation_date:
-                        resignation_date_obj = datetime.strptime(resignation_date, '%Y-%m-%d').date()
-                        if resignation_date_obj < cheque_date_obj:
+                        try:
+                            resignation_date_obj = datetime.strptime(resignation_date, '%Y-%m-%d').date()
+                        except (ValueError, TypeError):
+                            resignation_date_obj = None
+                        if resignation_date_obj and cheque_date_obj and resignation_date_obj < cheque_date_obj:
                             director_analysis['liable'] = False
                             director_analysis['exclusion_reasons'].append({
                                 'reason': 'Resigned Before Cheque Date',
@@ -5425,8 +5468,8 @@ def analyze_defence_vulnerabilities(case_data: Dict, ingredient_analysis: Dict, 
                         'Argue cheque issuance itself is acknowledgment'
                     ]
                 })
-        except:
-            pass
+        except Exception as _e:
+            logger.debug(f'Limitation defence calc: {_e}')
 
     if (case_data.get('dishonour_reason') or '').lower().find('stop') >= 0:
         stop_payment_strength = 40
@@ -5666,8 +5709,8 @@ def scan_procedural_defects(case_data: Dict, timeline_data: Dict, liability_data
                     ),
                     'check': 'Verify court interpretation and consider refiling next day if within limitation.'
                 })
-        except:
-            pass
+        except Exception as _e:
+            logger.debug(f'Same-day filing check: {_e}')
 
     if case_data.get('is_multiple_cheques') and case_data.get('number_of_cheques', 1) > 1:
         defect_scan['warnings'].append({
@@ -6122,12 +6165,12 @@ def calculate_overall_risk_score(
     if procedural_fatal_count >= 2:
         fatal_defect_override = True
         override_reason.append(f'{procedural_fatal_count} fatal procedural defects — technical dismissal likely')
-        risk_model['overall_risk_score'] = min(risk_model['overall_risk_score'], 30)
+        risk_model['overall_risk_score'] = min(float(risk_model.get('overall_risk_score') or 0), 30)
     elif procedural_fatal_count == 1 and (defect_data.get('overall_risk', '').startswith('CRITICAL')
                                            or defect_data.get('overall_risk', '').startswith('HIGH')):
         fatal_defect_override = True
         override_reason.append('Fatal procedural defect detected')
-        risk_model['overall_risk_score'] = min(risk_model['overall_risk_score'], 40)
+        risk_model['overall_risk_score'] = min(float(risk_model.get('overall_risk_score') or 0), 40)
     elif procedural_high_count >= 1:
         # HIGH risk procedural (e.g. same-day) — apply moderate reduction, not hard cap
         _high_reduction = round(risk_model.get('overall_risk_score', 0) * 0.20, 1)
@@ -6459,8 +6502,11 @@ def detect_edge_cases(case_data: Dict) -> Dict:
                 complexity += 20
             # Also flag if cheque date is significantly after transaction (informational)
             elif case_data.get('transaction_date'):
-                trans_dt = datetime.strptime(case_data['transaction_date'], '%Y-%m-%d')
-                if cheque_dt > trans_dt:
+                try:
+                    trans_dt = datetime.strptime(case_data['transaction_date'], '%Y-%m-%d')
+                except (ValueError, TypeError, KeyError):
+                    trans_dt = None
+                if trans_dt and cheque_dt and cheque_dt > trans_dt:
                     days_post_dated = (cheque_dt - trans_dt).days
                     if days_post_dated > 90:  # More than 3 months gap
                         edge_cases['detected_cases'].append({
@@ -6477,8 +6523,8 @@ def detect_edge_cases(case_data: Dict) -> Dict:
                             ]
                         })
                         complexity += 10
-        except:
-            pass
+        except Exception as _e:
+            logger.debug(f'Limitation defence calc: {_e}')
 
     if (case_data.get('dishonour_reason') or '').lower().find('stop') >= 0:
         edge_cases['detected_cases'].append({
@@ -6541,8 +6587,8 @@ def detect_edge_cases(case_data: Dict) -> Dict:
                     'consideration': f'Old Transaction ({age_years:.1f} years)',
                     'note': 'Time-barred debt defence likely - ensure cheque issuance itself is within limitation'
                 })
-        except:
-            pass
+        except (ValueError, TypeError) as _e:
+            logger.debug(f'transaction_date age calc: {_e}')
 
     edge_cases['complexity_score'] = min(100, complexity)
 
@@ -7293,7 +7339,7 @@ def analyze_part_payment_defence(case_data: Dict) -> Dict:
             payment_dt = datetime.strptime(part_payment_date, '%Y-%m-%d')
             notice_dt = datetime.strptime(notice_date, '%Y-%m-%d')
             payment_after_notice = payment_dt > notice_dt
-        except:
+        except (ValueError, TypeError):
             pass
 
     # Analyze impact
@@ -8771,8 +8817,8 @@ def generate_filing_readiness_checklist(
 
 
 
-def _safe(value, default="DATA NOT AVAILABLE", fmt=None):
-    """Return value safely, replacing None/empty/broken with default. Optionally format numbers."""
+def _safe_fmt(value, default="DATA NOT AVAILABLE", fmt=None):
+    """Format-aware safe helper. Use _safe() for simple guarding, _safe_fmt(v, fmt='inr') for INR/score/pct formatting."""
     if value is None or value == "" or value == {} or value == []:
         return default
     if isinstance(value, str) and value.strip() in ('??', '?', 'undefined', 'null', 'None', 'nan'):
@@ -10951,7 +10997,7 @@ def enforce_verdict_integrity(analysis_report: Dict) -> Dict:
     if 'executive_summary' in analysis_report:
         if isinstance(analysis_report['executive_summary'], dict):
             # Only override if verdict is genuinely FATAL (not same-day)
-            es = analysis_report['executive_summary']
+            es = analysis_report.get('executive_summary', {})
             _es_score = final_verdict.get('risk_score', risk_score)
             
             if is_fatal and len(fatal_defects) > 0:
@@ -11013,8 +11059,8 @@ def enforce_verdict_integrity(analysis_report: Dict) -> Dict:
     if 'professional_report' in analysis_report:
         if isinstance(analysis_report['professional_report'], dict):
             if 'summary' in analysis_report['professional_report']:
-                analysis_report['professional_report']['summary']['final_verdict'] = final_verdict['category']
-                analysis_report['professional_report']['summary']['recommendation'] = final_verdict['recommendation']
+                analysis_report['professional_report']['summary']['final_verdict'] = final_verdict.get('category','')
+                analysis_report['professional_report']['summary']['recommendation'] = final_verdict.get('recommendation','')
 
     logger.info("  ✅ Verdict integrity enforced - all modules synchronized")
 
@@ -11100,11 +11146,8 @@ def deduplicate_fatal_defects(defects: List[Dict]) -> List[Dict]:
     return result
 
 
-def calculate_data_completeness(case_data: Dict) -> Dict:
-    """
-    Calculate how complete the input data is.
-    Tells lawyers how reliable the analysis is.
-    """
+def _calculate_data_completeness_legacy(case_data: Dict) -> Dict:
+    """LEGACY — superseded by calculate_data_completeness below. Not called directly."""
     required   = ['cheque_date','dishonour_date','notice_date','complaint_filed_date',
                   'notice_received_date','cheque_amount','bank_name']
     important  = ['written_agreement_exists','ledger_available','postal_proof_available',
@@ -12808,8 +12851,8 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
                            'email_sms_evidence','transaction_date','transaction_amount']
         present_req = sum(1 for f in required_fields if case_data.get(f))
         present_opt = sum(1 for f in optional_fields if case_data.get(f))
-        completeness_pct = round((present_req / len(required_fields)) * 70 +
-                                  (present_opt / len(optional_fields)) * 30)
+        completeness_pct = round((present_req / (len(required_fields) or 1)) * 70 +
+                                  (present_opt / (len(optional_fields) or 1)) * 30)
         missing_fields = [f.replace('_',' ') for f in required_fields if not case_data.get(f)]
         missing_fields += [f.replace('_',' ') for f in optional_fields if not case_data.get(f)]
 
@@ -13518,7 +13561,7 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
             _pt_secs  = analysis_report.get('processing_time_seconds') or 0
             if _pt_secs == 0:
                 import time as _time
-                _pt_secs = round(_time.time() - start_time, 2) if 'start_time' in dir() else 0
+                _pt_secs = round(_time.time() - start_time, 2) if 'start_time' in locals() else 0
                 if _pt_secs > 0: analysis_report['processing_time_seconds'] = _pt_secs
             _pt_str   = f"{_pt_secs:.2f}s" if _pt_secs > 0 else "< 1s"
 
@@ -13591,8 +13634,8 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
                 'documentary_gaps_count': len(_doc_gaps),
                 # Cross-exam
                 'cross_exam_questions':  _cx_questions[:8],
-                'cross_exam_killer_questions': _killer_qs[:3] if '_killer_qs' in dir() else _cx_questions[:3],
-                'cross_exam_supporting_questions': _support_qs[:5] if '_support_qs' in dir() else _cx_questions[3:8],
+                'cross_exam_killer_questions': _killer_qs[:3] if '_killer_qs' in locals() else _cx_questions[:3],
+                'cross_exam_supporting_questions': _support_qs[:5] if '_support_qs' in locals() else _cx_questions[3:8],
                 'cross_exam_risk':       str(_cx.get('overall_cross_exam_risk') or _cx.get('overall_risk') or 'Insufficient data'),
                 'cross_exam_zones':      [
                     {'zone': str(z.get('zone', z.get('area',''))),
@@ -13707,7 +13750,7 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         except Exception as _e:
             logger.error(f'❌ _result building failed: {_e}')
             import traceback as _tb2; logger.error(_tb2.format_exc())
-            analysis_report['_result'] = {'overall_score': analysis_report.get('risk_score', 0), 'is_fatal': bool(analysis_report.get('fatal_flag')), 'filing_status': 'See analysis', 'processing_time': f"{round(time.time() - start_time, 2) if 'start_time' in dir() else 1.2:.2f}s", 'documentary_gaps': [], 'cross_exam_questions': [], 'next_actions': [], 'presumption_stage': 'INSUFFICIENT DATA', 'burden_position': 'INSUFFICIENT DATA', 'court_name': 'Not specified', 'court_confidence': 'INSUFFICIENT DATA', 'court_note': 'Judicial behaviour analysis unavailable — insufficient court data.', 'capped_at': 0, 'capped_at_display': 'DATA NOT AVAILABLE', 'original_score': analysis_report.get('risk_score', 0), 'fatal_override_note': 'DATA NOT AVAILABLE'}
+            analysis_report['_result'] = {'overall_score': analysis_report.get('risk_score', 0), 'is_fatal': bool(analysis_report.get('fatal_flag')), 'filing_status': 'See analysis', 'processing_time': f"{round(time.time() - start_time, 2) if 'start_time' in locals() else 1.2:.2f}s", 'documentary_gaps': [], 'cross_exam_questions': [], 'next_actions': [], 'presumption_stage': 'INSUFFICIENT DATA', 'burden_position': 'INSUFFICIENT DATA', 'court_name': 'Not specified', 'court_confidence': 'INSUFFICIENT DATA', 'court_note': 'Judicial behaviour analysis unavailable — insufficient court data.', 'capped_at': 0, 'capped_at_display': 'DATA NOT AVAILABLE', 'original_score': analysis_report.get('risk_score', 0), 'fatal_override_note': 'DATA NOT AVAILABLE'}
         logger.info(f"✅ Central result object built: {len(analysis_report['_result'])} fields")
 
         # ── FLAT KEY ALIASES ─────────────────────────────────────────────────
@@ -13767,9 +13810,9 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         db_saved = save_analysis_to_db(analysis_report)
         if not db_saved:
             logger.warning("⚠️ Analysis completed but failed to save to database")
-            analysis_report['audit_trail']['database_saved'] = False
+            analysis_report.setdefault('audit_trail', {})['database_saved'] = False
         else:
-            analysis_report['audit_trail']['database_saved'] = True
+            analysis_report.setdefault('audit_trail', {})['database_saved'] = True
 
         # NO LLM enhancement in analysis - LLM is ONLY for cross-examination
         # Cross-examination questions available via separate endpoint: POST /generate-cross-examination
@@ -14081,7 +14124,11 @@ async def generate_report(case_id: str, format: str = "executive"):
         if not result:
             raise HTTPException(status_code=404, detail="Case not found")
 
-        analysis_data = json.loads(result[0])
+        try:
+            analysis_data = json.loads(result[0])
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.error(f"Failed to parse stored analysis JSON: {e}")
+            raise HTTPException(status_code=500, detail="Stored analysis data is corrupted")
 
         if format == "executive":
             report = generate_executive_report(analysis_data)
@@ -14120,7 +14167,11 @@ async def get_report_data(case_id: str):
         if not result:
             raise HTTPException(status_code=404, detail=f"Case not found: {case_id}")
 
-        a = json.loads(result[0])
+        try:
+            a = json.loads(result[0])
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.error(f"Failed to parse case JSON: {e}")
+            raise HTTPException(status_code=500, detail="Case analysis data is corrupted")
         return _build_flat_report(a)
 
     except HTTPException:
@@ -14489,7 +14540,7 @@ async def analyze_case(request: CaseAnalysisRequest, http_request: Request = Non
                 "error_message": error_msg,
                 "error_details": analysis.get('error_traceback', ''),
                 "debug_traceback": analysis.get('error_traceback', ''),
-                "audit_trail": audit.get_trail() if 'audit' in dir() else {}
+                "audit_trail": audit.get_trail() if 'audit' in locals() else {}
             }
 
         analysis['audit_trail'] = audit.get_trail()
@@ -14632,7 +14683,7 @@ async def get_case_history(case_id: str):
                 "analysis_timestamp": timestamp,
                 "overall_risk_score": risk_score,
                 "compliance_level": compliance,
-                "analysis": json.loads(analysis_json)
+                "analysis": json.loads(analysis_json) if analysis_json else {}
             }
         else:
             raise HTTPException(status_code=404, detail=f"Case not found: {case_id}")
@@ -15110,6 +15161,7 @@ def apply_severity_tier_escalation(issues: Dict) -> Dict:
 
 
 USAGE_LOG = []
+_usage_log_lock = threading.Lock()  # thread-safe USAGE_LOG
 
 def get_usage_analytics() -> Dict:
     if not USAGE_LOG:
