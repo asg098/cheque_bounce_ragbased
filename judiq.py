@@ -149,7 +149,12 @@ def format_timeline_transparency(timeline_data: Dict) -> Dict:
             }
 
             if 'notice_date' in dates:
-                notice = datetime.strptime(dates['notice_date'], '%Y-%m-%d').date()
+                try:
+                    notice = datetime.strptime(dates['notice_date'], '%Y-%m-%d').date()
+                except (ValueError, TypeError):
+                    notice = None
+                if notice is None:
+                    continue
                 days_diff = (notice - dishonour).days
 
                 if notice <= notice_deadline:
@@ -166,8 +171,12 @@ def format_timeline_transparency(timeline_data: Dict) -> Dict:
                     }
 
         if 'notice_date' in dates:
-            notice = datetime.strptime(dates['notice_date'], '%Y-%m-%d').date()
-            cause_of_action, explanation = get_cause_of_action(notice, 'delivered')
+            try:
+                notice = datetime.strptime(dates['notice_date'], '%Y-%m-%d').date()
+            except (ValueError, TypeError):
+                notice = None
+            if notice:
+                cause_of_action, explanation = get_cause_of_action(notice, 'delivered')
 
             transparent_timeline['critical_deadlines']['cause_of_action'] = {
                 'date': cause_of_action.isoformat(),
@@ -183,8 +192,12 @@ def format_timeline_transparency(timeline_data: Dict) -> Dict:
             }
 
             if 'complaint_filed_date' in dates:
-                complaint = datetime.strptime(dates['complaint_filed_date'], '%Y-%m-%d').date()
-                days_from_coa = (complaint - cause_of_action).days
+                try:
+                    complaint = datetime.strptime(dates['complaint_filed_date'], '%Y-%m-%d').date()
+                except (ValueError, TypeError):
+                    complaint = None
+                if complaint is not None and cause_of_action:
+                    days_from_coa = (complaint - cause_of_action).days
 
                 if complaint < cause_of_action:
                     # Strictly premature — filed before cause of action
@@ -1582,11 +1595,16 @@ def compute_unified_timeline(case_data: Dict) -> Dict:
             ).days
 
         if 'cheque_date' in dates and 'dishonour_date' in dates:
-            cheque_date_parsed = datetime.strptime(dates['cheque_date'], '%Y-%m-%d').date()
-            dishonour_date_parsed = datetime.strptime(dates['dishonour_date'], '%Y-%m-%d').date()
+            try:
+                cheque_date_parsed = datetime.strptime(dates['cheque_date'], '%Y-%m-%d').date()
+                dishonour_date_parsed = datetime.strptime(dates['dishonour_date'], '%Y-%m-%d').date()
+            except (ValueError, TypeError) as _e:
+                logger.warning(f"Invalid date in timeline calc: {_e}")
+                cheque_date_parsed = dishonour_date_parsed = None
 
-            expiry_date, days_validity = calculate_cheque_expiry(cheque_date_parsed)
-            gap_days = (dishonour_date_parsed - cheque_date_parsed).days
+            if cheque_date_parsed and dishonour_date_parsed:
+                expiry_date, days_validity = calculate_cheque_expiry(cheque_date_parsed)
+                gap_days = (dishonour_date_parsed - cheque_date_parsed).days
 
             timeline_obj['validity']['cheque_valid'] = dishonour_date_parsed <= expiry_date
             timeline_obj['validity']['days_from_cheque'] = gap_days
@@ -1595,17 +1613,25 @@ def compute_unified_timeline(case_data: Dict) -> Dict:
             timeline_obj['validity']['days_before_expiry'] = (expiry_date - dishonour_date_parsed).days
 
         if 'dishonour_date' in dates and 'notice_date' in dates:
-            dishonour_dt = datetime.strptime(dates['dishonour_date'], '%Y-%m-%d').date()
-            notice_dt = datetime.strptime(dates['notice_date'], '%Y-%m-%d').date()
-            notice_deadline = add_calendar_months(dishonour_dt, 1)
+            try:
+                dishonour_dt = datetime.strptime(dates['dishonour_date'], '%Y-%m-%d').date()
+                notice_dt = datetime.strptime(dates['notice_date'], '%Y-%m-%d').date()
+            except (ValueError, TypeError) as _e:
+                logger.warning(f"Invalid dishonour/notice date: {_e}")
+                dishonour_dt = notice_dt = None
+            if dishonour_dt and notice_dt:
+                notice_deadline = add_calendar_months(dishonour_dt, 1)
             timeline_obj['compliance']['notice_within_limit'] = notice_dt <= notice_deadline
             timeline_obj['compliance']['notice_deadline'] = notice_deadline.isoformat()
             timeline_obj['compliance']['notice_days'] = (notice_dt - dishonour_dt).days
 
         if 'notice_date' in dates and 'complaint_filed_date' in dates:
-
-            notice_dt = datetime.strptime(dates['notice_date'], '%Y-%m-%d').date()
-            complaint_dt = datetime.strptime(dates['complaint_filed_date'], '%Y-%m-%d').date()
+            try:
+                notice_dt = datetime.strptime(dates['notice_date'], '%Y-%m-%d').date()
+                complaint_dt = datetime.strptime(dates['complaint_filed_date'], '%Y-%m-%d').date()
+            except (ValueError, TypeError) as _e:
+                logger.warning(f"Invalid notice/complaint date: {_e}")
+                notice_dt = complaint_dt = None
             cause_of_action, _ = get_cause_of_action(notice_dt, 'delivered')
             complaint_deadline = add_calendar_months(cause_of_action, 1)
             timeline_obj['compliance']['complaint_within_limit'] = complaint_dt <= complaint_deadline
@@ -1680,7 +1706,10 @@ def safe_calculation(func):
 def calculate_notice_deadline(dishonour_date):
 
     if isinstance(dishonour_date, str):
-        dishonour_date = datetime.strptime(dishonour_date, '%Y-%m-%d').date()
+        try:
+            dishonour_date = datetime.strptime(dishonour_date, '%Y-%m-%d').date()
+        except (ValueError, TypeError):
+            raise ValueError(f"Invalid dishonour_date '{dishonour_date}' — expected YYYY-MM-DD")
     deadline = add_calendar_months(dishonour_date, 1)
     return deadline
 
@@ -2392,8 +2421,8 @@ def get_calibrated_weights() -> Dict[str, float]:
             )
         ])
 
-        debt_rate = (debt_failures / total) * 100
-        notice_rate = (notice_failures / total) * 100
+        debt_rate = (debt_failures / total) * 100 if total > 0 else 0
+        notice_rate = (notice_failures / total) * 100 if total > 0 else 0
 
         _calibrated_weights_cache = {
             'debt': min(40, max(10, debt_rate)),
@@ -3566,7 +3595,11 @@ def analyze_timeline(case_data: Dict) -> Dict:
         complaint_filed_date = datetime.strptime(case_data['complaint_filed_date'], '%Y-%m-%d').date() if case_data.get('complaint_filed_date') else None
 
         if cheque_date:
-            if cheque_date < datetime.strptime(CONFIG["CHEQUE_VALIDITY_CHANGE_DATE"], '%Y-%m-%d').date():
+            try:
+                _validity_boundary = datetime.strptime(CONFIG["CHEQUE_VALIDITY_CHANGE_DATE"], '%Y-%m-%d').date()
+            except (ValueError, KeyError):
+                _validity_boundary = datetime(2012, 4, 1).date()  # RBI circular default
+            if cheque_date < _validity_boundary:
                 validity_days = 180
                 timeline_analysis['calculation_log'].append({
                     'rule': 'Cheque Validity (Pre-2012)',
@@ -3724,7 +3757,10 @@ def analyze_timeline(case_data: Dict) -> Dict:
             timeline_analysis['limitation_risk'] = 'CANNOT ASSESS'
 
         if complaint_filed_date and 'fifteen_day_expiry' in timeline_analysis['critical_dates']:
-            cause_of_action = datetime.strptime(timeline_analysis['critical_dates']['fifteen_day_expiry'], '%Y-%m-%d').date()
+            try:
+                cause_of_action = datetime.strptime(timeline_analysis['critical_dates']['fifteen_day_expiry'], '%Y-%m-%d').date()
+            except (ValueError, TypeError):
+                cause_of_action = None
             limitation_deadline = add_calendar_months(cause_of_action, 1)
             timeline_analysis['critical_dates']['limitation_deadline'] = limitation_deadline.strftime('%Y-%m-%d')
 
@@ -5186,8 +5222,10 @@ def analyze_accused_liability(case_data: Dict) -> Dict:
             cheque_date = case_data.get('cheque_date')
 
             if directors_list and cheque_date:
-                # datetime already imported at top of file
-                cheque_date_obj = datetime.strptime(cheque_date, '%Y-%m-%d').date()
+                try:
+                    cheque_date_obj = datetime.strptime(cheque_date, '%Y-%m-%d').date()
+                except (ValueError, TypeError):
+                    cheque_date_obj = None
 
                 for director in directors_list:
                     director_analysis = {
@@ -5318,9 +5356,11 @@ def analyze_accused_liability(case_data: Dict) -> Dict:
         # Board Resolution & Signatory Authority (ENHANCED)
         board_resolution_date = case_data.get('board_resolution_date')
         if board_resolution_date and cheque_date:
-            # datetime already imported at top of file
-            resolution_date_obj = datetime.strptime(board_resolution_date, '%Y-%m-%d').date()
-            cheque_date_obj = datetime.strptime(cheque_date, '%Y-%m-%d').date()
+            try:
+                resolution_date_obj = datetime.strptime(board_resolution_date, '%Y-%m-%d').date()
+                cheque_date_obj = datetime.strptime(cheque_date, '%Y-%m-%d').date()
+            except (ValueError, TypeError):
+                resolution_date_obj = cheque_date_obj = None
 
             liability_analysis['vicarious_liability_check']['signatory_authorization'] = {
                 'board_resolution_date': board_resolution_date,
@@ -10566,7 +10606,7 @@ def generate_explainability(analysis: Dict, case_data: Dict) -> Dict:
         positives.append('Low defence exposure — accused has limited grounds to challenge')
 
     # ── Final verdict explanation ──
-    if fatal or any(r['verdict'] in ('FATAL', 'CRITICAL') for r in reasons):
+    if fatal or any(r.get('verdict', '') in ('FATAL', 'CRITICAL') for r in reasons):
         decision_basis = 'DO NOT FILE — one or more fatal conditions are present that will result in dismissal'
     elif score >= 75:
         decision_basis = 'READY TO FILE — statutory compliance is strong with manageable gaps'
@@ -10699,8 +10739,8 @@ def get_case_strength_tag(analysis: Dict) -> Dict:
     if score >= 35:
         return {'tag': 'WEAK', 'colour': 'ORANGE', 'emoji': '🔴', 'score': score,
                 'label': 'WEAK — High risk', 'description': 'Significant gaps — remediation required before filing'}
-    return {'tag': 'FATAL', 'colour': 'RED', 'emoji': '⛔', 'score': score,
-            'label': 'FATAL — Do not file', 'description': 'Multiple critical deficiencies — do not file'}
+    return {'tag': 'VERY_WEAK', 'colour': 'RED', 'emoji': '🔴', 'score': score,
+            'label': 'VERY WEAK — Do not proceed', 'description': 'Multiple critical gaps — substantial remediation required before filing'}
 
 
 def get_missing_documents(analysis: Dict, case_data: Dict) -> Dict:
@@ -10765,7 +10805,7 @@ def get_missing_documents(analysis: Dict, case_data: Dict) -> Dict:
         'critical_count':   critical_count,
         'high_count':       high_count,
         'missing_documents': missing,
-        'filing_blocked_by': [m['document'] for m in missing if m['criticality'] == 'CRITICAL'],
+        'filing_blocked_by': [m.get('document','') for m in missing if m.get('criticality') == 'CRITICAL'],
         'summary':          (f'{critical_count} critical document(s) missing — filing not advisable'
                              if critical_count else
                              f'{high_count} important document(s) missing — strengthen before filing'
@@ -10910,9 +10950,9 @@ def get_risk_breakdown(analysis: Dict) -> Dict:
         })
 
     # Overall risk direction
-    scores = [d['score'] for d in breakdown]
+    scores = [d.get('score', 0) for d in breakdown]
     avg    = round(sum(scores) / len(scores), 1) if scores else 0
-    worst  = min(breakdown, key=lambda x: x['score']) if breakdown else {}
+    worst  = min(breakdown, key=lambda x: x.get('score', 0)) if breakdown else {}
 
     return {
         'dimensions':           breakdown,
@@ -11935,7 +11975,7 @@ def calculate_data_completeness(case_data: Dict) -> Dict:
     provided = [f for f, label, req in scored_fields if case_data.get(f) not in (None, '', False)]
     missing_required = [label for f, label, req in scored_fields if req and case_data.get(f) in (None, '')]
     missing_optional = [label for f, label, req in scored_fields if not req and case_data.get(f) in (None, '', False)]
-    pct = round(len(provided) / len(scored_fields) * 100)
+    pct = round(len(provided) / len(scored_fields) * 100) if scored_fields else 0
     return {
         'completeness_pct':   pct,
         'completeness_label': 'Complete' if pct >= 85 else ('Mostly Complete' if pct >= 65 else ('Partial' if pct >= 45 else 'Incomplete')),
@@ -14294,7 +14334,7 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
                 'cheque_amount', 'bank_name', 'court_location', 'notice_received_date'
             ]
             _filled = sum(1 for f in _data_fields if case_data.get(f))
-            _data_completeness_pct = max(30, round(_filled / len(_data_fields) * 100))  # min 30%
+            _data_completeness_pct = max(30, round(_filled / len(_data_fields) * 100)) if _data_fields else 30  # min 30%
 
             # ── Issue 12: Analysis confidence ──
             _modules_populated = sum(1 for m in [_tl, _ing, _doc, _risk, _pres, _cx, _def] if m)
@@ -15216,6 +15256,17 @@ async def generate_cross_examination(request: CrossExaminationRequest):
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Cross-examination error: {str(e)}")
 
+
+def _safe_json_parse(s: str, default=None):
+    """Safely parse JSON string, returning default on error."""
+    if not s:
+        return default if default is not None else {}
+    try:
+        return json.loads(s)
+    except (json.JSONDecodeError, TypeError, ValueError) as e:
+        logger.warning(f"JSON parse failed: {e}")
+        return default if default is not None else {}
+
 @app.post("/analyze-case")
 @limiter.limit("30/minute")
 async def analyze_case(request: CaseAnalysisRequest, http_request: Request = None):
@@ -15431,7 +15482,7 @@ async def get_case_history(case_id: str):
                 "analysis_timestamp": timestamp,
                 "overall_risk_score": risk_score,
                 "compliance_level": compliance,
-                "analysis": json.loads(analysis_json) if analysis_json else {}
+                "analysis": _safe_json_parse(analysis_json)
             }
         else:
             raise HTTPException(status_code=404, detail=f"Case not found: {case_id}")
@@ -15643,7 +15694,7 @@ async def get_court_intelligence(court_name: str):
 
         if compounded > 0:
             report['settlement_intelligence'] = {
-                'compounding_rate': round((compounded / total) * 100, 1),
+                'compounding_rate': round((compounded / total) * 100, 1) if total > 0 else 0,
                 'compounded_cases': compounded,
                 'interim_compensation_orders': interim,
                 'interim_rate': round((interim / total) * 100, 1) if interim else 0
