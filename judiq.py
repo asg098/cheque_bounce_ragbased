@@ -10653,10 +10653,14 @@ def enforce_verdict_integrity(analysis_report: Dict) -> Dict:
         if defence_fatal:
             fatal_sources.append('defence_risk')
 
-    # Get fatal defects from risk assessment
+    # Get REAL fatal defects from risk assessment (exclude same-day)
     fatal_defects = []
     if 'modules' in analysis_report and 'risk_assessment' in analysis_report['modules']:
-        fatal_defects = analysis_report['modules']['risk_assessment'].get('fatal_defects', [])
+        _all_ra_fatals = analysis_report['modules']['risk_assessment'].get('fatal_defects', [])
+        fatal_defects = [d for d in _all_ra_fatals
+                         if 'same-day' not in str(d.get('defect','')).lower()
+                         and 'same day' not in str(d.get('defect','')).lower()
+                         and d.get('is_absolute') is not False]
         if len(fatal_defects) > 0:
             fatal_sources.append('risk_assessment')
 
@@ -10724,8 +10728,7 @@ def enforce_verdict_integrity(analysis_report: Dict) -> Dict:
                 logger.info("  ℹ️ Section 65B - Electronic evidence is supporting only - minimal impact")
 
     # Apply penalties to risk_score
-    risk_score = risk_score - jurisdiction_penalty - section_65b_penalty
-    risk_score = max(0, risk_score)  # Floor at 0
+    risk_score = round(max(15, risk_score - jurisdiction_penalty - section_65b_penalty), 1)  # Floor at 15, not 0
     logger.info(f"  📊 Adjusted risk score after jurisdiction/65B: {risk_score}")
 
     # CRITICAL: Update risk_assessment module with adjusted score to prevent contradictions
@@ -10733,7 +10736,11 @@ def enforce_verdict_integrity(analysis_report: Dict) -> Dict:
         risk_module = analysis_report['modules']['risk_assessment']
         base_score = risk_module.get('overall_risk_score_base', risk_score + jurisdiction_penalty + section_65b_penalty)
 
-        risk_module['overall_risk_score'] = risk_score
+        # Preserve base score — only update if we're adding legitimate adjustments
+        _orig_risk_score = risk_module.get('overall_risk_score', risk_score)
+        _adjusted_score  = round(max(15, _orig_risk_score - jurisdiction_penalty - section_65b_penalty), 1)
+        risk_module['overall_risk_score']      = _adjusted_score
+        risk_module['overall_risk_score_base'] = _orig_risk_score  # preserve original
         risk_module['adjusted'] = True
         risk_module['adjustments'] = {
             'jurisdiction_penalty': jurisdiction_penalty,
@@ -10756,8 +10763,14 @@ def enforce_verdict_integrity(analysis_report: Dict) -> Dict:
                     risk_module['explanation']['calculation_steps'].append(penalty_text)
                     risk_module['explanation']['final_score'] = risk_score
 
-    # Consolidate fatal determination
-    is_fatal = fatal_flag or len(fatal_sources) > 0 or defence_risk_level == 'FATAL' or 'FATAL' in overall_status
+    # Consolidate fatal determination — exclude same-day-only fatal flags
+    _same_day_only = analysis_report.get('same_day_filing', False) and not fatal_sources
+    is_fatal = (
+        (fatal_flag and not _same_day_only) or
+        len(fatal_sources) > 0 or
+        defence_risk_level == 'FATAL' or
+        'FATAL' in overall_status
+    )
 
     # PHASE 2: Determine SINGLE TRUTH (Priority order)
 
@@ -10769,7 +10782,7 @@ def enforce_verdict_integrity(analysis_report: Dict) -> Dict:
         final_verdict = {
             'status': 'FATAL',
             'category': 'CRITICAL FAILURE',
-            'risk_score': 0,  # HARD CAP at 0 for fatal
+            'risk_score': min(risk_score, 25),  # cap at 25 not 0 — base score preserved
             'recommendation': 'DO NOT FILE - Fatal defects present',
             'predicted_outcome': 'Case will be dismissed',
             'filing_blocked': True,
@@ -10908,31 +10921,35 @@ def enforce_verdict_integrity(analysis_report: Dict) -> Dict:
         if final_verdict['status'] in ['FATAL', 'CRITICAL']:
             analysis_report['modules']['document_compliance']['filing_readiness'] = '❌ NOT READY TO FILE'
 
-    # Override executive summary to match final verdict
+    # Override executive summary to match final verdict — SINGLE SOURCE OF TRUTH
     if 'executive_summary' in analysis_report:
         if isinstance(analysis_report['executive_summary'], dict):
-            analysis_report['executive_summary']['overall_assessment'] = final_verdict['category']
-            # Sync fatal state into executive_summary
-            if analysis_report.get('fatal_flag'):
-                analysis_report['executive_summary']['filing_verdict'] = (
-                    analysis_report['executive_summary'].get('filing_verdict') or
-                    'DO NOT FILE — FATAL DEFECTS PRESENT'
-                )
-                analysis_report['executive_summary']['fatal_defects_count'] = max(
-                    analysis_report['executive_summary'].get('fatal_defects_count', 0),
-                    len(analysis_report.get('modules', {}).get('procedural_defects', {}).get('fatal_defects', [])) +
-                    len(analysis_report.get('modules', {}).get('risk_assessment', {}).get('fatal_defects', []))
-                )
-            # Update case overview to reflect final truth
-            status_marker = '🔴' if final_verdict['status'] == 'FATAL' else ('⚠️' if final_verdict['status'] in ['CRITICAL', 'WEAK'] else '✅')
-            analysis_report['executive_summary']['case_overview'] = f"{status_marker} {final_verdict['status']}: {final_verdict['reasoning']}"
+            # Only override if verdict is genuinely FATAL (not same-day)
+            es = analysis_report['executive_summary']
+            _es_score = final_verdict.get('risk_score', risk_score)
+            
+            if is_fatal:  # use computed is_fatal which excludes same-day
+                es['overall_assessment'] = 'FATAL FAILURE'
+                es['filing_verdict']     = 'DO NOT FILE — FATAL DEFECTS PRESENT'
+                es['fatal_defects_count']= len([d for d in fatal_defects if d.get('severity') in ('FATAL','CRITICAL')])
+            else:
+                # Preserve the verdict from generate_executive_summary
+                # Only update overall_assessment to match final_verdict.category
+                es['overall_assessment'] = final_verdict.get('category', es.get('overall_assessment',''))
+                # Do NOT override filing_verdict if it was correctly set
+
+            # Update case overview — clean single-line status
+            status_marker = '🔴' if is_fatal else ('⚠️' if final_verdict['status'] in ['CRITICAL', 'WEAK'] else '✅')
+            es['case_overview'] = f"{status_marker} {final_verdict['status']}: {final_verdict['reasoning']}"
+            # Sync final score into executive summary
+            es['final_score']     = _es_score
+            es['final_score_display'] = f"{_es_score}/100"
 
             # Override strategic recommendations to match verdict
-            if final_verdict['status'] == 'FATAL':
-                analysis_report['executive_summary']['strategic_recommendations'] = [
-                    'DO NOT FILE - Fatal defects present',
-                    'Immediate remediation required',
-                    'Consult legal counsel before proceeding'
+            if is_fatal:
+                es['strategic_recommendations'] = [
+                    {'priority': 'URGENT', 'action': 'Do not file — fatal defects present',
+                     'recommendation': 'Address all fatal defects before filing', 'rationale': ', '.join(fatal_sources)}
                 ]
             elif final_verdict['status'] == 'CRITICAL':
                 analysis_report['executive_summary']['strategic_recommendations'] = [
