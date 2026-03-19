@@ -11563,7 +11563,10 @@ def generate_plain_summary(analysis: Dict, case_data: Dict) -> Dict:
     defence = analysis.get('modules', {}).get('defence_risk_analysis', {})
     verdict = analysis.get('verdict', {})
 
-    score         = risk.get('overall_risk_score', 0)
+    # Use canonical _result score (same as deriveFilingStatus in frontend)
+    # Falls back to risk module score if _result not yet built
+    _res    = analysis.get('_result', {})
+    score   = float(_res.get('overall_score') or risk.get('overall_risk_score') or 0)
     compliance    = risk.get('compliance_level', 'UNKNOWN')
     fatal_flag    = analysis.get('fatal_flag', False)
     fatal_defects = doc.get('fatal_defects', [])
