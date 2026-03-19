@@ -13447,8 +13447,9 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         logger.info("✅ PHASE 1 COMPLETE: No fatal conditions - Proceeding to full analysis")
         analysis_report['audit_log']['phase_1_passed'] = True
 
-        logger.info("🔧 PHASE 2: Full Module Execution")
-        analysis_report['audit_log']['phases_executed'].append('PHASE_2_FULL_ANALYSIS')
+        logger.info("🔧 PHASE 2: Core Analysis Modules")
+        analysis_report['audit_log']['phases_executed'].append('PHASE_2_CORE_ANALYSIS')
+        analysis_report['audit_log']['phase_2_started'] = datetime.now().isoformat()
 
         logger.info("  Module 2: Ingredient Analysis...")
         try:
@@ -13690,9 +13691,36 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         # ============================================================================
         # VERDICT INTEGRITY - ENFORCE BEFORE SUMMARIES
         # ============================================================================
+        logger.info("🔧 PHASE 3: Verdict Integrity + Consistency Check")
+        analysis_report['audit_log']['phases_executed'].append('PHASE_3_CONSISTENCY')
+        analysis_report['audit_log']['phase_3_started'] = datetime.now().isoformat()
+
         logger.info("🎯 Enforcing Verdict Integrity (Pre-Summary)...")
         analysis_report = enforce_verdict_integrity(analysis_report)
 
+        # ── STEP 3: CONSISTENCY CHECK — runs after verdict integrity ──────
+        # Ensures fatal_flag, score, and filing_status all agree before
+        # any report or summary is generated. Auto-corrects where possible.
+        logger.info("🔍 Running internal consistency check...")
+        _consistency = run_consistency_check(analysis_report)
+        if _consistency.get('corrections'):
+            _corr = _consistency['corrections']
+            if 'fatal_flag' in _corr:
+                analysis_report['fatal_flag'] = _corr['fatal_flag']
+                logger.info(f"  ⚙️  Corrected fatal_flag → {_corr['fatal_flag']}")
+            if 'filing_status_override' in _corr:
+                _es = analysis_report.get('executive_summary') or {}
+                if _es:
+                    _es['filing_status'] = _corr['filing_status_override']
+                    logger.info(f"  ⚙️  Corrected filing_status → {_corr['filing_status_override']}")
+        analysis_report['_consistency_check'] = _consistency
+        if _consistency.get('blocked'):
+            logger.error(f"  🛑 Consistency check BLOCKED output: {_consistency.get('issues')}")
+        logger.info(f"  ✅ Consistency: {_consistency['message']}")
+
+        logger.info("🔧 PHASE 4: Decision Generation (Reports + Summaries)")
+        analysis_report['audit_log']['phases_executed'].append('PHASE_4_DECISION_GENERATION')
+        analysis_report['audit_log']['phase_4_started'] = datetime.now().isoformat()
         logger.info("📊 Generating Executive Intelligence Report...")
         try:
             analysis_report['executive_summary'] = generate_executive_summary(
@@ -13776,9 +13804,9 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
             'adjustments_made': weight_explanations
         }
 
-        logger.info("  🔍 Advanced Contradiction Detection...")
-        contradictions_enterprise = detect_contradictions(case_data)
-        analysis_report['contradictions_detected'] = contradictions_enterprise
+        logger.info("  🔍 Advanced Contradiction Detection (reusing Module 9 result)")
+        # contradiction_result already computed above — reuse, do not re-run
+        analysis_report['contradictions_detected'] = contradiction_result
 
         logger.info("  🛡️ Fraud Risk Analysis...")
         fraud_analysis = calculate_fraud_risk(case_data)
@@ -13786,16 +13814,13 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
 
         analysis_report['version_info'] = get_version_info()
 
-        logger.info("📄 Module 14: Document Compliance Analysis...")
-        doc_compliance = analyze_document_compliance(case_data)
-        analysis_report['modules']['document_compliance'] = doc_compliance
-        analysis_report['architecture']['deterministic_modules'].append('Document Compliance')
-
+        logger.info("📄 Module 14: Document Compliance (reusing Phase 1 result — no re-run)")
+        # doc_compliance already computed in PHASE 1 (L13302) — reuse, do not call again
+        # Re-check fatal status in case module sequence changed it
         if len(doc_compliance.get('fatal_defects', [])) > 0:
             analysis_report['fatal_flag'] = True
             analysis_report['overall_status'] = 'FATAL - FILING BLOCKED'
             analysis_report['filing_blocked'] = True
-            logger.warning("🔴 FATAL DOCUMENT DEFECTS — continuing modules for complete report")
 
         logger.info("⚖️ Module 15: Defence Risk Analysis...")
         defence_risks = analyze_defence_risks(case_data, doc_result)
@@ -15528,6 +15553,28 @@ async def analyze_case(request: CaseAnalysisRequest, http_request: Request = Non
     try:
         case_data = request.model_dump()
 
+        # ── STEP 1: INPUT SANITY CHECK (runs before any analysis) ──────────
+        # Detects impossible inputs: date inversions, zero amounts,
+        # notice before dishonour, complaint before notice, etc.
+        _sanity = run_input_sanity_check(case_data)
+        if not _sanity['is_clean']:
+            _hard_errors = [e for e in _sanity.get('errors', [])
+                            if e.get('check') not in ('FUTURE_DATE_CHEQUE_DATE',)]
+            if _hard_errors:
+                logger.warning(f"⚠️ INPUT SANITY FAILED: {len(_hard_errors)} hard error(s)")
+                return {
+                    "success": False,
+                    "error": "Input sanity check failed",
+                    "sanity_errors": _hard_errors,
+                    "sanity_warnings": _sanity.get('warnings', []),
+                    "input_sanity": _sanity,
+                    "message": "One or more input values are logically impossible. Correct and resubmit.",
+                    "audit_trail": audit.get_trail(),
+                }
+        # Store sanity result for later use (analysis + response)
+        case_data['_sanity_check'] = _sanity
+
+        # ── STEP 2: PYDANTIC / STRICT VALIDATION ───────────────────────────
         is_valid, validation_errors, sanitized_data = validate_case_input_strict(case_data)
         audit.log_validation(is_valid, validation_errors)
 
@@ -15646,6 +15693,8 @@ async def analyze_case(request: CaseAnalysisRequest, http_request: Request = Non
             "api_response_time_ms": round((time.time() - start) * 1000, 1),
             "engine_version": ENGINE_VERSION,
             "maturity_grade": "Production Stable",
+            # ── Input sanity (always exposed) ─────────────────────────────
+            "input_sanity_pre":  case_data.get('_sanity_check', {}),
             # ── Layer 12 shortcuts ─────────────────────────────────────────
             "decision_confidence":   plain_summary.get('decision_confidence', {}),
             "contradictions":        plain_summary.get('contradictions', {}),
