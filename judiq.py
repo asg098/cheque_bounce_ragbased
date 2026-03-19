@@ -6364,7 +6364,11 @@ def analyze_settlement_exposure(case_data: Dict, risk_score_data: Dict) -> Dict:
             settlement_analysis['settlement_probability'] = 'HIGH - Accused under significant pressure'
             settlement_analysis['strategic_options'].append({
                 'option': 'Settle Quickly at Full Amount or Slightly Less',
-                'rationale': 'Strong case against accused. Settlement cheaper than conviction + legal costs.',
+                'rationale': (
+                    'Strong procedural case. Settlement avoids conviction risk and legal costs. '
+                    'Absence of documentary proof may give some negotiation leverage.'
+                ) if not case_data.get('written_agreement_exists') else
+                'Strong case against accused. Settlement cheaper than conviction + legal costs.',
                 'financial_impact': f'Pay around {cheque_amount * 0.90:.2f} to {cheque_amount}'
             })
             settlement_analysis['strategic_options'].append({
@@ -6392,12 +6396,24 @@ def analyze_settlement_exposure(case_data: Dict, risk_score_data: Dict) -> Dict:
             })
 
         case_strength = risk_score_data['overall_risk_score']
+        _doc_weak = (risk_score_data.get('category_scores', {}).get('Documentary Strength', {}) or {}).get('score', 100)
+        if isinstance(_doc_weak, dict):
+            _doc_weak = _doc_weak.get('score', 100)
+        _doc_weak = float(_doc_weak or 100)
+
         if case_strength >= 70:
             settlement_analysis['settlement_leverage'] = SettlementPressure.HIGH
             settlement_analysis['settlement_probability'] = 'HIGH - Strong position to demand full payment'
+            if _doc_weak < 60:
+                _rationale = (
+                    'Case has procedural strength but weak documentary evidence. '
+                    'Accused may contest on transaction basis — settle quickly to avoid documentary challenge at trial.'
+                )
+            else:
+                _rationale = 'Strong case with solid documentary foundation. Accused faces high conviction risk.'
             settlement_analysis['strategic_options'].append({
                 'option': 'Demand Full Payment',
-                'rationale': 'Strong case. Accused facing conviction.',
+                'rationale': _rationale,
                 'financial_impact': f'Recover full {cheque_amount}'
             })
             settlement_analysis['strategic_options'].append({
@@ -8141,23 +8157,22 @@ def generate_executive_summary(
     if not case_data.get('written_agreement_exists'):
         weaknesses.append("No written agreement — debt enforceability can be challenged ❌")
 
-    # ── Documentary context (explain strength vs weakness) ──
+    # ── Documentary context (separate field — NOT a weakness list item) ──
     _doc_score = _n(_doc.get('overall_strength_score'))
     _has_primary = case_data.get('original_cheque_available') and case_data.get('return_memo_available')
     _missing_secondary = not case_data.get('written_agreement_exists') or not case_data.get('ledger_available')
     if _has_primary and _missing_secondary and _doc_score < 60:
         documentary_context = (
-            "Core instruments present (cheque + dishonour memo), but supporting financial proof is missing. "
-            "Low documentary score reflects absence of written agreement and transaction records — "
-            "not absence of the cheque itself."
+            "Core instruments present (cheque + dishonour memo), but no documentary proof of legally "
+            "enforceable debt. Accused can challenge the transaction basis."
         )
     elif _doc_score >= 70:
-        documentary_context = "Documentary evidence is in strong order."
+        documentary_context = "Documentary evidence is in reasonable order."
     else:
-        documentary_context = f"Documentary strength is {_doc_score:.0f}% — strengthen supporting records before filing."
-    weaknesses.append(f"⚠️ Context: {documentary_context}")
+        documentary_context = f"Documentary strength: {_doc_score:.0f}/100 — obtain written agreement and financial records before filing."
+    # documentary_context is returned as its own field — never appended to weaknesses
     if not case_data.get('ledger_available'):
-        weaknesses.append("No ledger/records — transaction trail incomplete ❌")
+        weaknesses.append("No financial records — transaction trail incomplete ❌")
     if not case_data.get('postal_proof_available'):
         weaknesses.append("No postal proof — notice service presumption weak ❌")
     if not weaknesses:
@@ -8289,16 +8304,21 @@ def generate_executive_summary(
 
     # Outcome probability (Fix 14)
     if fatal_flag:
-        outcome_probability = 'HIGH probability of dismissal -- fatal procedural defect present'
+        outcome_probability = 'HIGH probability of dismissal — fatal procedural defect present'
         dismissal_risk = 'CERTAIN' if any('premature' in str(d).lower() for d in unique_fatals) else 'HIGH'
     elif score >= 75:
-        outcome_probability = 'MODERATE-HIGH probability of conviction if evidence maintained'
-        dismissal_risk = 'LOW'
+        _doc_s = _n(doc_data.get('overall_strength_score', 0))
+        if _doc_s < 55:
+            outcome_probability = 'MODERATE — procedural compliance adequate but weak documentary evidence creates acquittal risk'
+            dismissal_risk = 'MEDIUM'
+        else:
+            outcome_probability = 'MODERATE-HIGH probability of conviction if evidence maintained'
+            dismissal_risk = 'LOW'
     elif score >= 55:
-        outcome_probability = 'MODERATE -- outcome depends on evidence strengthening'
+        outcome_probability = 'MODERATE — case is legally valid but outcome depends on documentary strengthening'
         dismissal_risk = 'MEDIUM'
     else:
-        outcome_probability = 'LOW probability of conviction -- significant gaps present'
+        outcome_probability = 'LOW probability of conviction — significant compliance gaps present'
         dismissal_risk = 'HIGH'
 
     # Opponent strategy (Fix 15)
@@ -8322,8 +8342,33 @@ def generate_executive_summary(
                 'not repayment. Will demand proof of underlying transaction.'
             )
 
+    # ── Top-level one-line summary (Issue 6 / Issue 9) ──────────────────────
+    # A single sentence a lawyer can read in 3 seconds. Always data-driven.
+    _doc_s2 = _n(doc_data.get('overall_strength_score', 0))
+    if unique_fatals:
+        top_summary = (
+            f"Case has a fatal procedural defect — do not file until resolved. "
+            f"Risk score: {score:.0f}/100."
+        )
+    elif score >= 75 and _doc_s2 >= 60:
+        top_summary = (
+            f"Case is in a strong position to file — statutory requirements largely satisfied. "
+            f"Risk score: {score:.0f}/100."
+        )
+    elif score >= 55:
+        top_summary = (
+            f"Case is legally valid but weak due to lack of documentary proof of debt. "
+            f"Risk score: {score:.0f}/100. Strengthen documentation before filing."
+        )
+    else:
+        top_summary = (
+            f"Case has multiple compliance gaps — significant remediation required before filing. "
+            f"Risk score: {score:.0f}/100."
+        )
+
     return {
         # ── Decision-grade top box ──────────────────────────────
+        'top_summary':               top_summary,
         'case_status_box':           case_status_box,
         'case_status':               filing_verdict,
         'primary_issue':             _primary_issue,
@@ -8350,6 +8395,7 @@ def generate_executive_summary(
         'limitation_status':         limitation_status,
         'processing_time':           'See response root',
         'edge_cases_alert':          edge_cases_alert[:3],
+        'documentary_context':       documentary_context,
         'generated_by':              'JUDIQ Intelligence Engine',
     }
 
