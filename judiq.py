@@ -13170,6 +13170,101 @@ def generate_score_explanation(risk_result: Dict) -> Dict:
     }
 
 
+def run_consistency_check(analysis_report: Dict) -> Dict:
+    """
+    PHASE 3: Internal Consistency Check
+
+    Verifies that fatal_flag, overall_risk_score, and filing_status are all
+    mutually consistent after verdict integrity enforcement. Auto-corrects
+    stale fatal_flag (False direction only — Phase 1 owns True direction).
+
+    Returns a dict with:
+      - 'passed'      : bool   — True if no blocking issues
+      - 'blocked'     : bool   — True if output should be suppressed (severe contradiction)
+      - 'issues'      : list   — detected inconsistencies (each a str)
+      - 'corrections' : dict   — proposed auto-corrections
+      - 'message'     : str    — human-readable summary
+    """
+    issues      = []
+    corrections = {}
+    blocked     = False
+
+    fatal_flag   = analysis_report.get('fatal_flag', False)
+    overall_status = analysis_report.get('overall_status', '')
+
+    # Read authoritative risk score from modules if available
+    risk_score = 50
+    if 'modules' in analysis_report and 'risk_assessment' in analysis_report.get('modules', {}):
+        risk_score = analysis_report['modules']['risk_assessment'].get('overall_risk_score', 50) or 50
+    else:
+        risk_score = analysis_report.get('risk_score', 50) or 50
+
+    # Read filing_status from executive_summary if present
+    exec_summary   = analysis_report.get('executive_summary') or {}
+    filing_status  = exec_summary.get('filing_status', '')
+
+    # ── Check 1: fatal_flag=True but score is HIGH (stale flag scenario) ──────
+    if fatal_flag and risk_score > 65:
+        issues.append(
+            f'fatal_flag=True but risk_score={risk_score:.1f} (>65) — possible stale fatal flag'
+        )
+        # Phase 3 may only CLEAR a stale fatal_flag, never set it
+        real_fatals = []
+        if 'modules' in analysis_report and 'risk_assessment' in analysis_report.get('modules', {}):
+            _all = analysis_report['modules']['risk_assessment'].get('fatal_defects', [])
+            real_fatals = [d for d in _all
+                           if 'same-day' not in str(d.get('defect', '')).lower()
+                           and 'same day'  not in str(d.get('defect', '')).lower()
+                           and d.get('is_absolute') is not False]
+        if not real_fatals:
+            corrections['fatal_flag'] = False  # safe to clear
+
+    # ── Check 2: fatal_flag=False but score is VERY LOW ──────────────────────
+    if not fatal_flag and risk_score < 20:
+        issues.append(
+            f'fatal_flag=False but risk_score={risk_score:.1f} (<20) — unusually low score without fatal flag'
+        )
+        # Do NOT set fatal_flag=True here — Phase 1 authority; just note it
+
+    # ── Check 3: filing_status vs fatal_flag mismatch ────────────────────────
+    if filing_status:
+        status_lower = filing_status.lower()
+        if fatal_flag and 'file' in status_lower and 'do not' not in status_lower and 'cannot' not in status_lower:
+            issues.append(
+                f'fatal_flag=True but filing_status suggests filing is advised: "{filing_status}"'
+            )
+            corrections['filing_status_override'] = 'DO NOT FILE — Fatal defect(s) detected'
+        elif not fatal_flag and ('do not file' in status_lower or 'cannot file' in status_lower):
+            issues.append(
+                f'fatal_flag=False but filing_status blocks filing: "{filing_status}"'
+            )
+            # Let Phase 1 / Phase 2 own this; no auto-correction
+
+    # ── Check 4: overall_status vs fatal_flag ────────────────────────────────
+    if fatal_flag and overall_status and 'strong' in overall_status.lower():
+        issues.append(
+            f'fatal_flag=True but overall_status="{overall_status}" — contradiction in final verdict'
+        )
+        blocked = len(issues) >= 3  # block only on multiple compounding issues
+
+    # ── Build result ──────────────────────────────────────────────────────────
+    passed  = len(issues) == 0
+    if passed:
+        message = 'All checks passed — fatal_flag, score, and filing_status are consistent'
+    elif corrections:
+        message = f'{len(issues)} issue(s) detected; {len(corrections)} auto-correction(s) applied'
+    else:
+        message = f'{len(issues)} issue(s) detected; manual review recommended'
+
+    return {
+        'passed':      passed,
+        'blocked':     blocked,
+        'issues':      issues,
+        'corrections': corrections,
+        'message':     message,
+    }
+
+
 def perform_comprehensive_analysis(case_data: Dict) -> Dict:
 
     analysis_start_time = datetime.now()
