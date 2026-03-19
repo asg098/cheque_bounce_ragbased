@@ -6098,21 +6098,21 @@ def calculate_overall_risk_score(
 
     # Score interpretation — authoritative single block
     risk_model['score_interpretation'] = (
-        'Very Weak — High dismissal probability' if _rs < 30 else
-        'Weak — Significant gaps, remediation required' if _rs < 50 else
-        'Moderate — Maintainable with strengthening' if _rs < 65 else
-        'Good — Reasonable chance of success' if _rs < 80 else
+        'Very Weak — High dismissal probability' if _final < 30 else
+        'Weak — Significant gaps, remediation required' if _final < 50 else
+        'Moderate — Maintainable with strengthening' if _final < 65 else
+        'Good — Reasonable chance of success' if _final < 80 else
         'Strong — Well-supported case'
     )
     risk_model['score_band'] = (
-        '0–30: Very Weak' if _rs < 30 else
-        '30–50: Weak' if _rs < 50 else
-        '50–65: Moderate' if _rs < 65 else
-        '65–80: Good' if _rs < 80 else
+        '0–30: Very Weak' if _final < 30 else
+        '30–50: Weak' if _final < 50 else
+        '50–65: Moderate' if _final < 65 else
+        '65–80: Good' if _final < 80 else
         '80–100: Strong'
     )
     # Fix 16: Round all scores to 1 decimal — prevent 61.528571428571425
-    risk_model['overall_risk_score'] = round(_rs, 1)
+    risk_model['overall_risk_score'] = round(_final, 1)
 
     if all_fatal_defects:
         original_score = risk_model['overall_risk_score']
