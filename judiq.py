@@ -14759,6 +14759,9 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
                 f"Based on cases from {_jud_court}. Confidence: {_jud_conf}."
             )
     
+            # Initialise _same_day_filing BEFORE the filing-verdict block that uses it
+            _same_day_filing = bool(analysis_report.get('same_day_filing', False))
+
             # Filing verdict — same-day is HIGH RISK not DO NOT FILE
             _has_real_fatal = any(
                 d.get('severity') in ('FATAL','CRITICAL') and
@@ -14804,9 +14807,8 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
             _score_cap           = _risk.get('score_cap_explanation') or {}
             _base_score_display  = round(float(_score_cap.get('base_score', _orig_before) or _orig_before), 1)
 
-            # ── Same-day filing: use the flag set by timeline checkpoint ──
+            # ── Same-day filing: flag already initialised above ──
             # (Do NOT read from _uniq_f — same-day is already filtered out of it)
-            _same_day_filing = bool(analysis_report.get('same_day_filing', False))
             if _same_day_filing:
                 # Move same-day from fatal to high-risk — it's interpretational, not absolute
                 _uniq_f_real_fatal = [d for d in _uniq_f if 'same-day' not in str(d.get('defect','')).lower()
