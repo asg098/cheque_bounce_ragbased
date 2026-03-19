@@ -2112,7 +2112,7 @@ def validate_case_input_strict(case_data: Dict) -> Tuple[bool, List[str], Dict]:
             if field not in optional_dates:
                 errors.append(f"MISSING required date: '{field}'")
             else:
-                warnings.append(f"⚠ '{field}' not provided — related analysis will be skipped")
+                warnings.append(f"⚠️ '{field}' not provided — related analysis will be skipped")
             continue
 
         try:
@@ -2124,14 +2124,14 @@ def validate_case_input_strict(case_data: Dict) -> Tuple[bool, List[str], Dict]:
             # Future dates: soft warning only (e.g. complaint not yet filed but being assessed)
             if days_diff > 1:
                 warnings.append(
-                    f"⚠ '{field}' is {days_diff} days in the future ({parsed}) — "
+                    f"⚠️ '{field}' is {days_diff} days in the future ({parsed}) — "
                     f"analysis proceeds with provided date"
                 )
 
             # Very old dates: soft warning
             if parsed.year < 2000:
                 warnings.append(
-                    f"⚠ '{field}' year {parsed.year} is before 2000 — verify this is correct"
+                    f"⚠️ '{field}' year {parsed.year} is before 2000 — verify this is correct"
                 )
 
             parsed_dates[field] = parsed
@@ -2155,13 +2155,13 @@ def validate_case_input_strict(case_data: Dict) -> Tuple[bool, List[str], Dict]:
 
     # ── Missing optional fields: soft warnings ──
     if 'complaint_filed_date' not in parsed_dates:
-        warnings.append("⚠ 'complaint_filed_date' not provided — limitation period analysis will be partial")
+        warnings.append("⚠️ 'complaint_filed_date' not provided — limitation period analysis will be partial")
 
     if not case_data.get('return_memo_available'):
-        warnings.append("⚠ Return memo not marked available — documentary strength will be reduced")
+        warnings.append("⚠️ Return memo not marked available — documentary strength will be reduced")
 
     if not case_data.get('postal_proof_available'):
-        warnings.append("⚠ Postal proof not provided — notice service presumption may be challenged")
+        warnings.append("⚠️ Postal proof not provided — notice service presumption may be challenged")
 
     # ── case_type normalisation ──
     case_type_raw = case_data.get('case_type', '').strip().lower()
@@ -2186,12 +2186,12 @@ def validate_case_input_strict(case_data: Dict) -> Tuple[bool, List[str], Dict]:
         if any(kw in case_type_raw for kw in ('complain', 'plaintiff', 'recover', 'petitioner')):
             case_type = 'complainant'
             warnings.append(
-                f"⚠ case_type '{case_data.get('case_type')}' auto-mapped to 'complainant'"
+                f"⚠️ case_type '{case_data.get('case_type')}' auto-mapped to 'complainant'"
             )
         elif any(kw in case_type_raw for kw in ('accus', 'defend', 'respond')):
             case_type = 'accused'
             warnings.append(
-                f"⚠ case_type '{case_data.get('case_type')}' auto-mapped to 'accused'"
+                f"⚠️ case_type '{case_data.get('case_type')}' auto-mapped to 'accused'"
             )
         else:
             errors.append(
@@ -4914,8 +4914,8 @@ def analyze_documentary_strength(case_data: Dict) -> Dict:
         liability_details.append("❌ No documentary proof")
         doc_analysis['critical_gaps'].append({
             'category': 'Liability Documentation',
-            'gap': 'No written evidence of debt',
-            'impact': 'Severe - debt enforceability highly contestable',
+            'gap': 'No documentary proof of legally enforceable debt',
+            'impact': 'Severe — accused can challenge the existence of a legally enforceable debt, which is a fundamental Section 138 ingredient',
             'severity': 'CRITICAL',
             'deduction': -35
         })
@@ -5535,6 +5535,42 @@ def analyze_defence_vulnerabilities(case_data: Dict, ingredient_analysis: Dict, 
             ]
         })
 
+    # ── Documentary gap defence — ranks highest when no proof of legally enforceable debt ──
+    # This is the most realistic and legally significant defence in most no-agreement cases.
+    _no_agreement = not case_data.get('written_agreement_exists')
+    _no_ledger    = not case_data.get('ledger_available')
+    _no_bank      = not case_data.get('ledger_available') and not case_data.get('email_sms_evidence')
+    if _no_agreement or _no_ledger:
+        _doc_gap_score = 40  # base
+        if _no_agreement:
+            _doc_gap_score += 15  # no written agreement is the most exploitable gap
+        if _no_ledger:
+            _doc_gap_score += 10  # no ledger further weakens the debt story
+        if _no_bank:
+            _doc_gap_score += 5   # no financial trail at all
+        defence_matrix['possible_defences'].append({
+            'defence': 'Absence of Legally Enforceable Debt (No Documentary Proof)',
+            'strength': DefenceStrength.HIGH if _doc_gap_score >= 60 else DefenceStrength.MEDIUM,
+            'strength_score': min(_doc_gap_score, 85),
+            'basis': (
+                'No written agreement, ledger, or financial record exists to establish a legally enforceable debt. '
+                'Accused can deny the transaction entirely or claim the cheque was given as security.'
+            ),
+            'legal_principle': 'Section 138 NI Act — cheque must be drawn for discharge of a legally enforceable debt or liability',
+            'evidence_required_by_accused': [
+                'Denial of any loan or debt transaction',
+                'Claim that cheque was a security cheque or blank cheque',
+                'Point to absence of written agreement',
+                'Highlight lack of bank transfer or ledger record',
+            ],
+            'complainant_counter': [
+                'Invoke Section 139 presumption — burden shifts to accused to disprove debt',
+                'Produce any corroborating evidence: SMS, WhatsApp, email, witness',
+                'Argue part-payment or acknowledgment as evidence of debt',
+                'Show commercial relationship to establish context of debt',
+            ]
+        })
+
     settlement_strength = 30
     defence_matrix['possible_defences'].append({
         'defence': 'Settlement/Payment Made',
@@ -6024,13 +6060,17 @@ def calculate_overall_risk_score(
         _court_stage   = 'Likely to proceed to conviction'
         _court_action  = 'File complaint and apply for interim compensation under Section 143A'
     risk_model['outcome_probability'] = {
-        'label':                  _prob_label,
-        'dismissal_probability':  _prob_dismiss,
-        'conviction_probability': _prob_convict,
-        'likely_outcome':         _court_outcome,
-        'court_stage':            _court_stage,
-        'recommended_action':     _court_action,
-        'basis':                  'Based on statutory compliance score and fatal defect analysis',
+        'label':                        _prob_label,
+        'dismissal_probability':        _prob_dismiss,
+        'conviction_probability':       _prob_convict,
+        'conviction_probability_label': 'Conviction Probability',
+        'dismissal_probability_label':  'Dismissal Probability',
+        'conviction_probability_display': f"Conviction Probability: {_prob_convict}",
+        'dismissal_probability_display':  f"Dismissal Probability: {_prob_dismiss}",
+        'likely_outcome':               _court_outcome,
+        'court_stage':                  _court_stage,
+        'recommended_action':           _court_action,
+        'basis':                        'Based on statutory compliance score and fatal defect analysis',
     }
 
     # ── Score cap explanation (lawyers need to understand WHY the score is low) ──
@@ -8115,7 +8155,7 @@ def generate_executive_summary(
         documentary_context = "Documentary evidence is in strong order."
     else:
         documentary_context = f"Documentary strength is {_doc_score:.0f}% — strengthen supporting records before filing."
-    weaknesses.append(f"⚠ Context: {documentary_context}")
+    weaknesses.append(f"⚠️ Context: {documentary_context}")
     if not case_data.get('ledger_available'):
         weaknesses.append("No ledger/records — transaction trail incomplete ❌")
     if not case_data.get('postal_proof_available'):
@@ -8967,14 +9007,24 @@ def generate_clean_professional_report(analysis: Dict, case_data: Dict) -> Dict:
         # Derive reason from evidence + procedural modules — not independent logic
         _doc_score = _safe_score(documentary.get('overall_strength_score', 0))
         _proc_defects = defects_m.get('curable_defects') or []
-        if _doc_score < 60:
-            _caution_reason = "Weak documentary evidence"
+        _no_agreement = not case_data.get('written_agreement_exists')
+        _no_ledger    = not case_data.get('ledger_available')
+        if _doc_score < 60 and (_no_agreement or _no_ledger):
+            _caution_reason = "No documentary proof of legally enforceable debt"
+        elif _doc_score < 60:
+            _caution_reason = "Insufficient documentary evidence to establish transaction"
         elif _proc_defects:
-            _caution_reason = "Procedural gaps present"
+            _caution_reason = "Procedural gaps present — curable before filing"
         else:
             _caution_reason = "Evidentiary gaps require strengthening"
-        one_liner = f"Case is maintainable but has significant evidentiary gaps. Reason: {_caution_reason}. Risk score: {score}/100."
-        recommended_action = "Strengthen documentary evidence before filing to reduce acquittal risk."
+        one_liner = (
+            f"Case is legally valid but weak due to lack of documentary proof. "
+            f"Reason: {_caution_reason}. Risk score: {score}/100."
+        )
+        recommended_action = (
+            "Obtain documentary proof of the debt — written agreement, ledger records, "
+            "or bank transfer evidence — before filing to reduce acquittal risk."
+        )
     else:
         filing_status = "HIGH RISK — REMEDIATION REQUIRED"
         filing_colour = "RED"
@@ -9004,9 +9054,9 @@ def generate_clean_professional_report(analysis: Dict, case_data: Dict) -> Dict:
             reason = data.get('reason', '') if isinstance(data, dict) else ''
             weaknesses.append(f"{cat}: {s}/100 — {_safe(reason, 'Insufficient — strengthen before filing')}")
     if not case_data.get('written_agreement_exists'):
-        weaknesses.append("No written agreement — accused can challenge legally enforceable debt")
+        weaknesses.append("No documentary proof of legally enforceable debt — accused can challenge the fundamental Section 138 ingredient")
     if not case_data.get('ledger_available'):
-        weaknesses.append("No ledger/account records — transaction trail incomplete")
+        weaknesses.append("No ledger or financial records — transaction trail incomplete, making debt proof difficult")
     if not weaknesses:
         weaknesses.append("No critical weaknesses detected at this stage")
 
@@ -9138,9 +9188,13 @@ def generate_clean_professional_report(analysis: Dict, case_data: Dict) -> Dict:
         ],
         'document_gaps': R.get('documentary_gaps', []),
         'score_explanation': (
-            f"Documentary strength is {R.get('documentary_score', _safe_score(documentary.get('overall_strength_score')))}/100. "
-            + ("Written agreement and ledger are missing — without these, the accused can challenge "
-               "the existence of legally enforceable debt, which is a fundamental Section 138 ingredient."
+            f"Documentary strength: {R.get('documentary_score', _safe_score(documentary.get('overall_strength_score')))}/100. "
+            + ("No written agreement or financial records — accused can challenge the existence of a "
+               "legally enforceable debt, which is a fundamental Section 138 ingredient. "
+               "Obtain corroborating evidence (agreement, ledger, bank transfer, SMS) before filing."
+               if not case_data.get('written_agreement_exists') and not case_data.get('ledger_available') else
+               "No written agreement — accused can challenge the legally enforceable debt ingredient. "
+               "Obtain documentary evidence before filing."
                if not case_data.get('written_agreement_exists') else
                "Documentary evidence is in reasonable order.")
         )
@@ -9636,10 +9690,10 @@ def generate_executive_report(analysis_data: Dict) -> Dict:
             })
     if not doc_gaps and doc_data.get('overall_strength_score', 100) < 70:
         for field, label, sev, imp in [
-            ('written_agreement_exists', 'Written Loan/Transaction Agreement', 'Severe',
-             'Debt enforceability highly contestable — accused can deny legally enforceable debt'),
-            ('ledger_available',         'Ledger / Account Records', 'High',
-             'Transaction authenticity contestable — no paper trail of the transaction'),
+            ('written_agreement_exists', 'No documentary proof of legally enforceable debt', 'Severe',
+             'Accused can deny the existence of a legally enforceable debt — a fundamental Section 138 ingredient'),
+            ('ledger_available',         'No financial records or ledger entries', 'High',
+             'No independent paper trail of the alleged transaction — debt story is entirely oral and uncorroborated'),
             ('original_cheque_available','Original Cheque', 'High',
              'Primary instrument not secured — foundational evidence missing'),
             ('return_memo_available',    'Bank Dishonour Memo', 'Severe',
@@ -11492,9 +11546,9 @@ def generate_plain_summary(analysis: Dict, case_data: Dict) -> Dict:
     # ── Weaknesses ──
     weaknesses = []
     if not case_data.get('written_agreement_exists'):
-        weaknesses.append("No written loan/transaction agreement — accused can deny legally enforceable debt")
+        weaknesses.append("No documentary proof of legally enforceable debt — accused can deny or challenge the transaction in court")
     if not case_data.get('ledger_available'):
-        weaknesses.append("No ledger or account records — difficult to prove financial capacity and transaction trail")
+        weaknesses.append("No ledger or financial records — no independent paper trail to corroborate the alleged transaction")
     if limitation_risk in ['CRITICAL', 'EXPIRED']:
         weaknesses.append(f"Limitation period issue: {timeline.get('compliance_status', {}).get('limitation', 'check timeline')}")
     if fatal_defects:
@@ -11521,7 +11575,7 @@ def generate_plain_summary(analysis: Dict, case_data: Dict) -> Dict:
         )
     elif score >= 60:
         one_line = (
-            f"⚠️ Moderate case — procedural compliance is adequate but evidence is weak. "
+            f"⚠️ Case is legally valid but weak due to lack of documentary proof. "
             f"Risk score: {score:.0f}/100. Strengthen documentation before filing."
         )
     elif score >= 40:
@@ -14206,19 +14260,25 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         # ── Outcome probability ──
         _os = (risk_result.get('overall_risk_score') or 0)
         _is_f = analysis_report.get('fatal_flag', False)
+        _conv_prob = (
+            '<5%'   if _is_f else
+            '<30%'  if _os < 40 else
+            '40-60%' if _os < 70 else
+            '>70%'
+        )
+        _dism_prob = (
+            '>95%' if _is_f else
+            '>70%' if _os < 40 else
+            '40-60%' if _os < 60 else
+            '<25%'
+        )
         analysis_report['outcome_probability'] = {
-            'dismissal_probability': (
-                '>95%' if _is_f else
-                '>70%' if _os < 40 else
-                '40-60%' if _os < 60 else
-                '<25%'
-            ),
-            'conviction_probability': (
-                '<5%'   if _is_f else
-                '<30%'  if _os < 40 else
-                '40-60%' if _os < 70 else
-                '>70%'
-            ),
+            'dismissal_probability':          _dism_prob,
+            'conviction_probability':         _conv_prob,
+            'conviction_probability_label':   'Conviction Probability',
+            'dismissal_probability_label':    'Dismissal Probability',
+            'conviction_probability_display': f"Conviction Probability: {_conv_prob}",
+            'dismissal_probability_display':  f"Dismissal Probability: {_dism_prob}",
             'verdict_label': (
                 'Very High likelihood of dismissal'  if _is_f or _os < 30 else
                 'High dismissal risk'                if _os < 50 else
@@ -14570,10 +14630,10 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
             # Documentary gaps — always named
             _doc_gaps = []
             for _field, _label, _sev, _imp in [
-                ('written_agreement_exists', 'No written loan/transaction agreement', 'Severe',
-                 'Debt enforceability highly contestable — accused can deny legally enforceable debt'),
-                ('ledger_available',         'No ledger or account records',           'High',
-                 'Transaction trail incomplete — no financial record of the alleged loan'),
+                ('written_agreement_exists', 'No documentary proof of legally enforceable debt', 'Severe',
+                 'Accused can deny the existence of a legally enforceable debt — a fundamental Section 138 ingredient'),
+                ('ledger_available',         'No financial records or ledger entries',           'High',
+                 'No independent paper trail of the alleged transaction — debt story is entirely oral and uncorroborated'),
                 ('postal_proof_available',   'No postal proof of notice',              'Moderate',
                  'Notice service unproven — accused can deny receiving the legal notice'),
                 ('original_cheque_available','Original cheque not secured',            'High',
@@ -15469,10 +15529,10 @@ def _build_flat_report(a: dict) -> dict:
     if not doc_gaps:
         meta = a.get('case_metadata') or {}
         for field, label, sev, imp in [
-            ('written_agreement_exists', 'No written loan/transaction agreement', 'Severe',
-             'Debt enforceability highly contestable — accused can deny legally enforceable debt'),
-            ('ledger_available', 'No ledger or account records', 'High',
-             'Transaction trail incomplete — no financial record of the alleged loan'),
+            ('written_agreement_exists', 'No documentary proof of legally enforceable debt', 'Severe',
+             'Accused can deny the existence of a legally enforceable debt — a fundamental Section 138 ingredient'),
+            ('ledger_available', 'No financial records or ledger entries', 'High',
+             'No independent paper trail of the alleged transaction — debt story is entirely oral and uncorroborated'),
             ('postal_proof_available', 'No postal proof of notice', 'Moderate',
              'Notice service unproven — accused can deny receipt'),
             ('original_cheque_available', 'Original cheque not secured', 'High',
@@ -15600,6 +15660,12 @@ def _build_flat_report(a: dict) -> dict:
         'settlement_range':       _s(str(settle.get('recommended_settlement_range') or 'Not calculated')),
         'interim_eligible':       bool(settle.get('interim_compensation_eligible')),
         'cheque_amount':          a.get('case_metadata', {}).get('cheque_amount', 0),
+        # Conviction / dismissal probability — always separate named fields, never concatenated
+        'conviction_probability':         _s(((mods.get('risk_assessment') or {}).get('outcome_probability') or a.get('outcome_probability') or {}).get('conviction_probability'), 'See analysis'),
+        'dismissal_probability':          _s(((mods.get('risk_assessment') or {}).get('outcome_probability') or a.get('outcome_probability') or {}).get('dismissal_probability'), 'See analysis'),
+        'conviction_probability_display': _s(((mods.get('risk_assessment') or {}).get('outcome_probability') or a.get('outcome_probability') or {}).get('conviction_probability_display'), 'Conviction Probability: See analysis'),
+        'dismissal_probability_display':  _s(((mods.get('risk_assessment') or {}).get('outcome_probability') or a.get('outcome_probability') or {}).get('dismissal_probability_display'), 'Dismissal Probability: See analysis'),
+        'outcome_probability_label':      _s(((mods.get('risk_assessment') or {}).get('outcome_probability') or a.get('outcome_probability') or {}).get('verdict_label'), 'See analysis'),
         'court_name':             jud_court if jud_conf in ('HIGH', 'MEDIUM') else 'Not specified',
         'court_confidence':       jud_conf,
         'court_data_available':   jud_conf in ('HIGH', 'MEDIUM'),
