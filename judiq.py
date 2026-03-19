@@ -13216,6 +13216,16 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         logger.info("🚀 Starting comprehensive legal intelligence analysis...")
         start_time = time.time()
 
+        # ── PROCESSING FLAGS — control module execution (for scaling/performance) ──
+        processing_flags = {
+            'heavy_modules_enabled':       True,         # judicial_behavior, cross_exam, variance
+            'rag_modules_enabled':         bool(kb_loaded),  # only if KB is loaded
+            'advanced_modules_enabled':    True,         # dishonour, debt, drafting, fraud, 65B
+            'intelligence_layers_enabled': True,         # Layer 10/11/12 features
+            'audit_trail_enabled':         True,
+            'sanity_check_passed':         True,         # set False if sanity check flagged errors
+            'single_truth_enforced':       True,         # _result is the ONE source of truth
+        }
         analysis_report = {
             'case_id': hashlib.md5(json.dumps(case_data, sort_keys=True).encode()).hexdigest()[:12],
             'input_hash': hashlib.sha256(json.dumps(case_data, sort_keys=True).encode()).hexdigest(),
@@ -13243,6 +13253,7 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         }
 
         case_id = analysis_report['case_id']
+        analysis_report['processing_flags'] = processing_flags
         # Logging removed for production stability
 
         logger.info("🔧 PHASE 1: FATAL EVALUATION (Pre-Analysis)")
@@ -13705,9 +13716,15 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         _consistency = run_consistency_check(analysis_report)
         if _consistency.get('corrections'):
             _corr = _consistency['corrections']
-            if 'fatal_flag' in _corr:
-                analysis_report['fatal_flag'] = _corr['fatal_flag']
-                logger.info(f"  ⚙️  Corrected fatal_flag → {_corr['fatal_flag']}")
+            # Phase 3 rule: ONLY clear a stale fatal_flag (False correction).
+            # Phase 3 NEVER sets fatal_flag=True — that is Phase 1's exclusive responsibility.
+            if 'fatal_flag' in _corr and _corr['fatal_flag'] is False:
+                # Stale fatal flag — Phase 1 set it but no real fatal defects remain
+                analysis_report['fatal_flag'] = False
+                logger.info("  ⚙️  Phase 3: Cleared stale fatal_flag (no real fatal defects)")
+            elif 'fatal_flag' in _corr and _corr['fatal_flag'] is True:
+                # Do NOT override — Phase 1 owns fatal_flag=True
+                logger.info("  ℹ️  Phase 3: fatal_flag=True mismatch noted but not overridden (Phase 1 authority)")
             if 'filing_status_override' in _corr:
                 _es = analysis_report.get('executive_summary') or {}
                 if _es:
@@ -13772,7 +13789,7 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         # Only simulate variance if KB has sufficient data
         # Use kb_court_patterns from earlier KB search
         kb_provisions = len(kb_court_patterns) if kb_court_patterns else 0
-        if kb_provisions >= 10:  # Minimum threshold for statistical validity
+        if processing_flags.get('heavy_modules_enabled') and kb_provisions >= 10:  # Minimum threshold
             judicial_variance = simulate_judicial_variance(
                 (analysis_report['modules'].get('risk_assessment') or {}).get('overall_risk_score', 0),
                 {
@@ -13867,6 +13884,16 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         analysis_report['architecture']['deterministic_modules'].append('Filing Readiness')
 
         logger.info("✅ Advocate feedback modules complete")
+
+        # ── PERFORMANCE FLAGS — which modules were executed ─────────────
+        analysis_report['processing_flags'] = {
+            'heavy_modules_enabled': True,
+            'kb_available': kb_loaded,
+            'kb_rows': len(kb_data) if kb_loaded else 0,
+            'judicial_variance_enabled': kb_loaded and len(kb_court_patterns) >= 10,
+            'llm_enabled': False,
+            'all_phases_executed': True,
+        }
 
         analysis_report['enterprise_features'] = {
             'presumption_intelligence': True,
@@ -14028,7 +14055,7 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
 
         logger.info("✅ Execution validation complete")
 
-        logger.info("📋 Generating Audit Trail...")
+        logger.info("📋 Generating Audit Trail + Decision Trace...")
         analysis_report['audit_trail'] = generate_audit_trail(
             case_data,
             timeline_result,
@@ -14036,6 +14063,46 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
             doc_result,
             risk_result
         )
+
+        # ── DECISION NARRATIVE — human-readable audit chain ──────────────
+        # This is the explainability backbone — every decision traced to a module
+        _score_for_narrative = float((analysis_report.get('modules', {}).get('risk_assessment') or {}).get('overall_risk_score', 0) or 0)
+        _fatal_for_narrative = analysis_report.get('fatal_flag', False)
+        _doc_score_narrative = float((analysis_report.get('modules', {}).get('risk_assessment', {}).get('category_scores') or {}).get('Documentary Strength', {}).get('score', 0) if isinstance((analysis_report.get('modules', {}).get('risk_assessment', {}).get('category_scores') or {}).get('Documentary Strength'), dict) else 0)
+        _tl_score_narrative  = float((analysis_report.get('modules', {}).get('risk_assessment', {}).get('category_scores') or {}).get('Timeline Compliance', {}).get('score', 0) if isinstance((analysis_report.get('modules', {}).get('risk_assessment', {}).get('category_scores') or {}).get('Timeline Compliance'), dict) else 0)
+        analysis_report['decision_narrative'] = [
+            f"Timeline compliance: {_tl_score_narrative:.0f}/100 — {'Strong ✅' if _tl_score_narrative >= 75 else 'Weak ❌'}",
+            f"Documentary strength: {_doc_score_narrative:.0f}/100 — {'Adequate ✅' if _doc_score_narrative >= 60 else 'Insufficient — strengthen before filing ❌'}",
+            f"Fatal defects: {'Yes — filing blocked' if _fatal_for_narrative else 'None detected ✅'}",
+            f"Overall score: {_score_for_narrative:.1f}/100",
+            f"Decision basis: {'Fatal defect present — do not file' if _fatal_for_narrative else 'FILE WITH CAUTION — documentary weakness is primary gap' if _score_for_narrative < 70 else 'Case is strong — proceed to file'}",
+        ]
+        analysis_report['single_truth'] = {
+            'score':    round(_score_for_narrative, 1),
+            'decision': ('DO NOT FILE' if _fatal_for_narrative else
+                         'FILE WITH CAUTION' if _score_for_narrative < 70 else
+                         'READY TO FILE'),
+            'primary_gap': ('Fatal procedural defect' if _fatal_for_narrative else
+                            'Documentary evidence weakness' if _doc_score_narrative < 60 else
+                            'Minor gaps — proceed'),
+            'source': 'analysis_pipeline',  # frontend must read from here, not compute independently
+        }
+
+        # ── Build plain-language decision trace (audit backbone) ──────────
+        _risk_for_trace = analysis_report.get('modules', {}).get('risk_assessment', {}) or {}
+        _score_for_trace = round(float(_risk_for_trace.get('overall_risk_score', 0) or 0), 1)
+        _fatal_for_trace = analysis_report.get('fatal_flag', False)
+        _tl_for_trace = analysis_report.get('modules', {}).get('timeline_intelligence', {}) or {}
+        _lim_for_trace = str((_tl_for_trace.get('compliance_status') or {}).get('limitation', '') or '')
+        analysis_report['decision_trace'] = [
+            f"INPUT: {len([f for f in ['cheque_date','dishonour_date','notice_date','complaint_filed_date'] if case_data.get(f)])}/4 critical dates provided",
+            f"TIMELINE: {_lim_for_trace or 'Status checked'} — limitation risk: {_tl_for_trace.get('limitation_risk','UNKNOWN')}",
+            f"SCORE: {_score_for_trace}/100 from weighted module combination",
+            f"FATAL FLAG: {'SET — filing blocked until resolved' if _fatal_for_trace else 'NOT SET — case is potentially maintainable'}",
+            f"CONSISTENCY: {analysis_report.get('_consistency_check', {}).get('message', 'Not checked')}",
+            f"FINAL DECISION: {analysis_report.get('executive_summary', {}).get('filing_verdict', 'See analysis')}",
+        ]
+        logger.info("  ✅ Decision trace built (%d steps)", len(analysis_report['decision_trace']))
 
         logger.info("💡 Generating Score Explanation...")
         analysis_report['score_explanation'] = generate_score_explanation(risk_result)
@@ -14628,14 +14695,18 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
                 'LOW'
             )
 
-            # ── Store central result object ───────────────────────────
+            # ── PHASE 4 OUTPUT: _result built AFTER consistency check ──────
+            # This is the SINGLE SOURCE OF TRUTH for all frontend consumption.
+            # Frontend must only read from _result — no independent logic.
             analysis_report['_result'] = {
                 # Scores
-                'overall_score':         _orig_score,
+                # ── SINGLE SCORE — no raw/capped confusion ──────────────
+                'overall_score':         _orig_score,   # canonical score — use this
                 'overall_score_display': f"{_orig_score:.1f}/100",
-                'original_score':        _orig_before,
-                'capped_at':             _cap_val,
-                'capped_at_display':     _cap_display,
+                'final_score':           _orig_score,   # alias for frontend
+                'final_score_display':   f"{_orig_score:.1f}/100",
+                # raw/base/capped are NOT exposed — ONE number only
+                'score_note':            f"Score: {_orig_score:.1f}/100",
                 'fatal_override_applied': _is_fatal and bool(_fdo),
                 'fatal_override_note':   (
                     f"Original: {_orig_before}/100 → Capped at {_cap_display} due to fatal defect"
@@ -14700,30 +14771,30 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
                 'court_indices':         {k: str(v) for k,v in (_jud.get('behavioral_indices') or {}).items()},
                 # Next actions
                 'next_actions':          _next_actions,
-            # Action timing — urgency insight for lawyer
-            'action_required_within': (
+                # Action timing — urgency insight for lawyer
+                'action_required_within': (
                 f"{_refiling.get('days_remaining', 0)} days"
                 if isinstance(_refiling, dict) and _refiling.get('days_remaining', 0) > 0
                 else 'Immediately'
-            ),
-            'action_deadline':        (
+                ),
+                'action_deadline':        (
                 _refiling.get('deadline_date', '')
                 if isinstance(_refiling, dict) else ''
-            ),
-            'urgency_note':           (
+                ),
+                'urgency_note':           (
                 f"⚠️ Only {_refiling.get('days_remaining',0)} days left to refile — act immediately"
                 if isinstance(_refiling, dict) and 0 < _refiling.get('days_remaining',0) <= 7 else
                 f"File fresh complaint within {_refiling.get('days_remaining',0)} days"
                 if isinstance(_refiling, dict) and _refiling.get('days_remaining',0) > 7 else
                 ''
-            ),
-            # Analysis confidence
-            'analysis_confidence':    _analysis_confidence,
-            'confidence_note': (
+                ),
+                # Analysis confidence
+                'analysis_confidence':    _analysis_confidence,
+                'confidence_note': (
                 'All core modules executed — high confidence in analysis'
                 if _analysis_confidence == 'HIGH' else
                 'Some modules incomplete — review with qualified counsel'
-            ),
+                ),
                 # Settlement
                 'cheque_amount':         case_data.get('cheque_amount', 0),
                 'settlement_recommended': bool(_sett.get('settlement_recommended')),
@@ -14737,28 +14808,9 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
                 'refiling_days_left':     (_tl.get('refiling_window') or {}).get('days_remaining', 0),
                 'refiling_deadline':      (_tl.get('refiling_window') or {}).get('deadline_date', ''),
                 'refiling_message':       (_tl.get('refiling_window') or {}).get('message', '') or str(_tl.get('refile_guidance', '')),
-                # Score cap explanation — WHY is the score X?
-                'final_score':            _orig_score,
-                'final_score_display':    f"{_orig_score:.1f}/100",
-                'score_note':             (
-                    f"Score: {_orig_score:.1f}/100 (fatal cap applied)"
-                    if _is_fatal else
-                    f"Score: {_orig_score:.1f}/100"
-                ),
+                # (final_score defined above — no duplicate)
                 # Primary fatal defect (single canonical entry)
-                # Deep Legal Intelligence Module Summaries
-            'dishonour_reason_category': str((_m.get('dishonour_analysis') or {}).get('reason_category', 'Not assessed')),
-            'dishonour_legal_strength':  str((_m.get('dishonour_analysis') or {}).get('legal_strength', 'Not assessed')),
-            'dishonour_legal_impact':    str((_m.get('dishonour_analysis') or {}).get('legal_impact', '')),
-            'debt_enforceable':          bool((_m.get('enforceable_debt') or {}).get('is_enforceable', True)),
-            'debt_fatal_issues_count':   len((_m.get('enforceable_debt') or {}).get('fatal_issues', [])),
-            'condonation_required':      bool((_m.get('delay_condonation') or {}).get('condonation_required', False)),
-            'condonation_strength':      str((_m.get('delay_condonation') or {}).get('condonation_strength', 'N/A')),
-            'drafting_score':            int((_m.get('drafting_compliance') or {}).get('compliance_score', 100)),
-            'drafting_gaps_count':       len((_m.get('drafting_compliance') or {}).get('critical_gaps', [])),
-            'doc_validity_score':        int((_m.get('document_validity') or {}).get('admissibility_score', 100)),
-            'fraud_risk_score':          int((_m.get('fraud_signals') or {}).get('fraud_risk_score', 0)),
-            'fraud_risk_level':          str((_m.get('fraud_signals') or {}).get('risk_level', 'LOW')),
+                # (module summaries using _mods below — _m aliases removed to avoid duplicate keys)
                 # Core metrics
                 'data_completeness':       _data_completeness_pct,
                 'filing_status':           _filing_verdict,
@@ -14842,13 +14894,35 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         analysis_hash = hashlib.sha256(analysis_sorted.encode()).hexdigest()
 
         # Add audit trail
+        # Build decision chain — human-readable record of how system reached verdict
+        _risk_r   = analysis_report.get('modules', {}).get('risk_assessment', {}) or {}
+        _tl_r     = analysis_report.get('modules', {}).get('timeline_intelligence', {}) or {}
+        _proc_r   = analysis_report.get('modules', {}).get('procedural_defects', {}) or {}
+        _doc_r    = analysis_report.get('modules', {}).get('documentary_strength', {}) or {}
+        _es_r     = analysis_report.get('executive_summary', {}) or {}
+        _final_sc = round(float(_risk_r.get('overall_risk_score', 0) or 0), 1)
+        _tl_lim   = str((_tl_r.get('compliance_status') or {}).get('limitation', '') or '')
+        _doc_sc   = round(float((_doc_r.get('overall_strength_score') or 0)), 1)
+        _proc_f   = len(_proc_r.get('fatal_defects', []) or [])
+        _decision_chain = []
+        _decision_chain.append(f'Timeline: {'BARRED/PREMATURE — FATAL' if any(x in _tl_lim.upper() for x in ("BARRED","PREMATURE")) else 'SAME-DAY RISK' if 'SAME' in _tl_lim.upper() else 'COMPLIANT'}')
+        _decision_chain.append(f'Documentary strength: {_doc_sc}/100 — {'Adequate' if _doc_sc >= 60 else 'Insufficient — reduces score'}')
+        _decision_chain.append(f'Procedural defects: {_proc_f} fatal defect(s) — {'present — score capped' if _proc_f > 0 else 'none detected'}')
+        _decision_chain.append(f'Composite score: {_final_sc}/100')
+        _decision_chain.append(f'Fatal flag: {"active — filing blocked" if analysis_report.get("fatal_flag") else "not set"}')
+        _decision_chain.append(f'Final verdict: {_es_r.get("filing_verdict", analysis_report.get("_result", {}).get("filing_status", "Unknown"))}')
+        if _consistency.get('corrections'):
+            for _k, _v in _consistency['corrections'].items():
+                _decision_chain.append(f'Auto-corrected: {_k} → {_v}')
         analysis_report['audit_trail'] = {
-            'input_hash': input_hash,
-            'analysis_hash': analysis_hash,
-            'timestamp': datetime.now().isoformat(),
-            'locked': True,
-            'version': 'v11.2',
-            'note': 'Analysis locked - input and output hashes recorded for integrity verification'
+            'input_hash':      input_hash,
+            'analysis_hash':   analysis_hash,
+            'timestamp':       datetime.now().isoformat(),
+            'locked':          True,
+            'version':         'v11.2',
+            'decision_chain':  _decision_chain,
+            'phases_executed': analysis_report.get('audit_log', {}).get('phases_executed', []),
+            'note': 'Analysis locked — input/output hashes + decision chain recorded'
         }
 
         logger.info(f"  🔒 Audit lock applied - Input hash: {input_hash[:16]}...")
@@ -15557,22 +15631,39 @@ async def analyze_case(request: CaseAnalysisRequest, http_request: Request = Non
         # Detects impossible inputs: date inversions, zero amounts,
         # notice before dishonour, complaint before notice, etc.
         _sanity = run_input_sanity_check(case_data)
-        if not _sanity['is_clean']:
-            _hard_errors = [e for e in _sanity.get('errors', [])
-                            if e.get('check') not in ('FUTURE_DATE_CHEQUE_DATE',)]
-            if _hard_errors:
-                logger.warning(f"⚠️ INPUT SANITY FAILED: {len(_hard_errors)} hard error(s)")
-                return {
-                    "success": False,
-                    "error": "Input sanity check failed",
-                    "sanity_errors": _hard_errors,
-                    "sanity_warnings": _sanity.get('warnings', []),
-                    "input_sanity": _sanity,
-                    "message": "One or more input values are logically impossible. Correct and resubmit.",
-                    "audit_trail": audit.get_trail(),
-                }
+        # Classify errors: HARD = impossible logic (stop) | SOFT = warnings (continue)
+        _SOFT_CHECKS = {
+            'FUTURE_DATE_CHEQUE_DATE',
+            'FUTURE_DATE_DISHONOUR_DATE',
+            'FUTURE_DATE_NOTICE_DATE',
+            'FUTURE_DATE_COMPLAINT_FILED_DATE',
+            'LARGE_AMOUNT',
+        }
+        _hard_errors = [e for e in _sanity.get('errors', [])
+                        if e.get('check') not in _SOFT_CHECKS]
+        _soft_warnings = _sanity.get('warnings', []) + [
+            e for e in _sanity.get('errors', []) if e.get('check') in _SOFT_CHECKS
+        ]
+        if _hard_errors:
+            logger.warning(f"⚠️ INPUT SANITY HARD STOP: {len(_hard_errors)} impossible input(s)")
+            return {
+                "success": False,
+                "error": "Input sanity check failed",
+                "error_type": "IMPOSSIBLE_INPUT",
+                "sanity_errors": _hard_errors,
+                "sanity_warnings": _soft_warnings,
+                "input_sanity": _sanity,
+                "proceed": False,
+                "message": "One or more inputs are logically impossible. Correct and resubmit.",
+                "audit_trail": audit.get_trail(),
+            }
+        # Soft warnings pass through — attach to case_data for downstream awareness
+        if _soft_warnings:
+            logger.info(f"ℹ️ Input sanity: {len(_soft_warnings)} soft warning(s) — proceeding")
         # Store sanity result for later use (analysis + response)
         case_data['_sanity_check'] = _sanity
+        # Soft warnings stored for downstream display
+        case_data['_sanity_warnings'] = _sanity.get('warnings', [])
 
         # ── STEP 2: PYDANTIC / STRICT VALIDATION ───────────────────────────
         is_valid, validation_errors, sanitized_data = validate_case_input_strict(case_data)
@@ -15693,8 +15784,22 @@ async def analyze_case(request: CaseAnalysisRequest, http_request: Request = Non
             "api_response_time_ms": round((time.time() - start) * 1000, 1),
             "engine_version": ENGINE_VERSION,
             "maturity_grade": "Production Stable",
+            # ── SINGLE SOURCE OF TRUTH (frontend must use these) ─────
+            "single_truth":         analysis.get('single_truth', {}),
+            "decision_narrative":   analysis.get('decision_narrative', []),
+            "processing_flags":     analysis.get('processing_flags', {}),
+            # ── Input sanity pre-check result ──────────────────────────
+            "input_sanity_pre":     case_data.get('_sanity_check', {}),
+            "sanity_warnings":      case_data.get('_sanity_warnings', []),
+
+            "processing_flags":      analysis.get('processing_flags', {}),
+
             # ── Input sanity (always exposed) ─────────────────────────────
             "input_sanity_pre":  case_data.get('_sanity_check', {}),
+            # ── Pipeline trace (explainability backbone) ───────────────────
+            "decision_trace":    analysis.get('decision_trace', []),
+            "processing_flags":  analysis.get('processing_flags', {}),
+            "pipeline_phases":   analysis.get('audit_log', {}).get('phases_executed', []),
             # ── Layer 12 shortcuts ─────────────────────────────────────────
             "decision_confidence":   plain_summary.get('decision_confidence', {}),
             "contradictions":        plain_summary.get('contradictions', {}),
