@@ -11826,7 +11826,7 @@ def enforce_verdict_integrity(analysis_report: Dict) -> Dict:
     # Top-level risk_score may not be set yet or may be stale
     risk_score = 50  # default
     if 'modules' in analysis_report and 'risk_assessment' in analysis_report['modules']:
-        risk_module = analysis_report['modules']['risk_assessment']
+        risk_module = analysis_report['modules'].get('risk_assessment', {})
         risk_score = risk_module.get('overall_risk_score', 50)
         logger.info(f"  📊 Reading authoritative risk score: {risk_score}")
     else:
@@ -11841,7 +11841,7 @@ def enforce_verdict_integrity(analysis_report: Dict) -> Dict:
     defence_risk_level = 'MEDIUM'
     defence_fatal = False
     if 'modules' in analysis_report and 'defence_risk_analysis' in analysis_report['modules']:
-        defence_module = analysis_report['modules']['defence_risk_analysis']
+        defence_module = analysis_report['modules'].get('defence_risk_analysis', {})
         defence_risk_level = defence_module.get('overall_risk', 'MEDIUM')
         defence_fatal = len(defence_module.get('fatal_defences', [])) > 0
         if defence_fatal:
@@ -11850,7 +11850,7 @@ def enforce_verdict_integrity(analysis_report: Dict) -> Dict:
     # Get REAL fatal defects from risk assessment (exclude same-day)
     fatal_defects = []
     if 'modules' in analysis_report and 'risk_assessment' in analysis_report['modules']:
-        _all_ra_fatals = analysis_report['modules']['risk_assessment'].get('fatal_defects', [])
+        _all_ra_fatals = analysis_report['modules'].get('risk_assessment', {}).get('fatal_defects', [])
         fatal_defects = [d for d in _all_ra_fatals
                          if 'same-day' not in str(d.get('defect','')).lower()
                          and 'same day' not in str(d.get('defect','')).lower()
@@ -11860,34 +11860,34 @@ def enforce_verdict_integrity(analysis_report: Dict) -> Dict:
 
     # Check Section 65B fatal
     if 'modules' in analysis_report and 'section_65b_compliance' in analysis_report['modules']:
-        section_65b = analysis_report['modules']['section_65b_compliance']
+        section_65b = analysis_report['modules'].get('section_65b_compliance', {})
         if section_65b.get('risk_level') == 'FATAL':
             fatal_sources.append('section_65b')
 
     # Check Income Tax 269SS critical (not necessarily fatal, but high risk)
     income_tax_critical = False
     if 'modules' in analysis_report and 'income_tax_269ss' in analysis_report['modules']:
-        tax_module = analysis_report['modules']['income_tax_269ss']
+        tax_module = analysis_report['modules'].get('income_tax_269ss', {})
         if tax_module.get('violation_detected') and tax_module.get('risk_level') == 'CRITICAL':
             fatal_sources.append('income_tax_269ss')
             income_tax_critical = True
 
     # Check part payment fatal
     if 'modules' in analysis_report and 'part_payment_analysis' in analysis_report['modules']:
-        part_payment = analysis_report['modules']['part_payment_analysis']
+        part_payment = analysis_report['modules'].get('part_payment_analysis', {})
         if part_payment.get('defence_strength') == 'FATAL':
             fatal_sources.append('part_payment')
 
     # Check notice delivery fatal
     if 'modules' in analysis_report and 'notice_delivery_status' in analysis_report['modules']:
-        notice_delivery = analysis_report['modules']['notice_delivery_status']
+        notice_delivery = analysis_report['modules'].get('notice_delivery_status', {})
         if notice_delivery.get('risk_level') == 'FATAL':
             fatal_sources.append('notice_delivery')
 
     # Check jurisdiction validity (FIX #2: Escalate CRITICAL jurisdiction to FATAL)
     jurisdiction_penalty = 0
     if 'modules' in analysis_report and 'territorial_jurisdiction' in analysis_report['modules']:
-        jurisdiction = analysis_report['modules']['territorial_jurisdiction']
+        jurisdiction = analysis_report['modules'].get('territorial_jurisdiction', {})
         jurisdiction_status = jurisdiction.get('status', '')
 
         # Don't penalize if data is insufficient - only penalize if actually invalid
@@ -11909,7 +11909,7 @@ def enforce_verdict_integrity(analysis_report: Dict) -> Dict:
     # Check Section 65B impact (FIX #3: Only penalize if PRIMARY evidence)
     section_65b_penalty = 0
     if 'modules' in analysis_report and 'section_65b_compliance' in analysis_report['modules']:
-        section_65b = analysis_report['modules']['section_65b_compliance']
+        section_65b = analysis_report['modules'].get('section_65b_compliance', {})
         if section_65b.get('applicable', False) and not section_65b.get('compliant', True):
             risk_level = section_65b.get('risk_level', 'LOW')
             # Only penalize FATAL/CRITICAL (electronic is PRIMARY proof)
@@ -11927,7 +11927,7 @@ def enforce_verdict_integrity(analysis_report: Dict) -> Dict:
 
     # CRITICAL: Update risk_assessment module with adjusted score to prevent contradictions
     if 'modules' in analysis_report and 'risk_assessment' in analysis_report['modules']:
-        risk_module = analysis_report['modules']['risk_assessment']
+        risk_module = analysis_report['modules'].get('risk_assessment', {})
         base_score = risk_module.get('overall_risk_score_base', risk_score + jurisdiction_penalty + section_65b_penalty)
 
         # Preserve base score — only update if we're adding legitimate adjustments
@@ -12079,7 +12079,7 @@ def enforce_verdict_integrity(analysis_report: Dict) -> Dict:
 
     # Override filing readiness module to match verdict - COMPREHENSIVE
     if 'modules' in analysis_report and 'filing_readiness' in analysis_report['modules']:
-        filing_module = analysis_report['modules']['filing_readiness']
+        filing_module = analysis_report['modules'].get('filing_readiness', {})
 
         # Determine ready_to_file based on final verdict
         ready_to_file = final_verdict['status'] in ['STRONG', 'MODERATE'] and not final_verdict['filing_blocked']
@@ -12112,7 +12112,7 @@ def enforce_verdict_integrity(analysis_report: Dict) -> Dict:
     # Override document compliance to reflect verdict
     if 'modules' in analysis_report and 'document_compliance' in analysis_report['modules']:
         if final_verdict['status'] in ['FATAL', 'CRITICAL']:
-            analysis_report['modules']['document_compliance']['filing_readiness'] = '❌ NOT READY TO FILE'
+            analysis_report['modules'].get('document_compliance', {})['filing_readiness'] = '❌ NOT READY TO FILE'
 
     # Override executive summary to match final verdict — SINGLE SOURCE OF TRUTH
     if 'executive_summary' in analysis_report:
@@ -13298,7 +13298,7 @@ def run_consistency_check(analysis_report: Dict) -> Dict:
     # Read authoritative risk score from modules if available
     risk_score = 50
     if 'modules' in analysis_report and 'risk_assessment' in analysis_report.get('modules', {}):
-        risk_score = analysis_report['modules']['risk_assessment'].get('overall_risk_score', 50) or 50
+        risk_score = analysis_report['modules'].get('risk_assessment', {}).get('overall_risk_score', 50) or 50
     else:
         risk_score = analysis_report.get('risk_score', 50) or 50
 
@@ -13314,7 +13314,7 @@ def run_consistency_check(analysis_report: Dict) -> Dict:
         # Phase 3 may only CLEAR a stale fatal_flag, never set it
         real_fatals = []
         if 'modules' in analysis_report and 'risk_assessment' in analysis_report.get('modules', {}):
-            _all = analysis_report['modules']['risk_assessment'].get('fatal_defects', [])
+            _all = analysis_report['modules'].get('risk_assessment', {}).get('fatal_defects', [])
             real_fatals = [d for d in _all
                            if 'same-day' not in str(d.get('defect', '')).lower()
                            and 'same day'  not in str(d.get('defect', '')).lower()
@@ -13991,10 +13991,10 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
             judicial_variance = simulate_judicial_variance(
                 (analysis_report['modules'].get('risk_assessment') or {}).get('overall_risk_score', 0),
                 {
-                    'timeline': analysis_report['modules']['risk_assessment']['category_scores']['Timeline Compliance']['score'],
-                    'ingredient': analysis_report['modules']['risk_assessment']['category_scores']['Ingredient Compliance']['score'],
-                    'documentary': analysis_report['modules']['risk_assessment']['category_scores']['Documentary Strength']['score'],
-                    'procedural': analysis_report['modules']['risk_assessment']['category_scores']['Procedural Compliance']['score']
+                    'timeline': analysis_report['modules'].get('risk_assessment', {})['category_scores']['Timeline Compliance']['score'],
+                    'ingredient': analysis_report['modules'].get('risk_assessment', {})['category_scores']['Ingredient Compliance']['score'],
+                    'documentary': analysis_report['modules'].get('risk_assessment', {})['category_scores']['Documentary Strength']['score'],
+                    'procedural': analysis_report['modules'].get('risk_assessment', {})['category_scores']['Procedural Compliance']['score']
                 }
             )
             analysis_report['judicial_variance_simulation'] = judicial_variance
@@ -16054,6 +16054,8 @@ async def analyze_case(request: CaseAnalysisRequest, http_request: Request = Non
             "sanity_warnings":   case_data.get('_sanity_warnings', []),
             "input_sanity":      plain_summary.get('input_sanity', {}),
 
+            # ── Module shortcuts (direct access) ────────────────────────
+            "modules":           analysis.get('modules', {}),
             # ── Full analysis object (contains .modules, ._result, etc.) ─
             "analysis": analysis,
 
