@@ -3822,7 +3822,15 @@ def analyze_timeline(case_data: Dict) -> Dict:
                     f'({cause_of_action.strftime("%Y-%m-%d")}). Procedural risk — interpretation dependent.'
                 )
                 timeline_analysis['limitation_risk'] = 'HIGH'   # NOT CRITICAL — same-day is borderline, not fatal
-                timeline_analysis['score'] = 55   # within limitation — score penalty applied separately
+                # Granular timeline score: start from 85 and deduct for each issue
+                _tl_granular = 85
+                for _mk in timeline_analysis.get('risk_markers', []):
+                    _mk_sev = _mk.get('severity', 'LOW')
+                    if _mk_sev == 'CRITICAL': _tl_granular -= 25
+                    elif _mk_sev == 'HIGH':   _tl_granular -= 15
+                    elif _mk_sev == 'MEDIUM': _tl_granular -= 8
+                _tl_granular = max(20, _tl_granular)
+                timeline_analysis['score'] = _tl_granular   # granular, not fixed 55
                 timeline_analysis['cause_of_action_reasoning'] = (
                     f'Cause of action under Section 138 arises at expiry of 15-day notice period '
                     f'({cause_of_action.strftime("%d %b %Y")}). Complaint filed on the SAME DAY '
@@ -6667,35 +6675,43 @@ def detect_edge_cases(case_data: Dict) -> Dict:
 
 
 def pure_escalation_engine(flags: Dict) -> Dict:
+    """
+    Escalation engine: adjusts the computed base_score by applying
+    hard floors/caps for serious conditions. Never replaces — only constrains.
+    """
+    base = float(flags.get('base_score', 50) or 50)
 
     if flags.get('fatal', False):
         return {
             'tier': 'FATAL',
             'status': 'CASE FAILURE',
-            'score': 0,
+            'score': min(base, 15),   # cap at 15, not hard-zero (preserve some base signal)
             'recommendation': 'DO NOT FILE',
             'reason': 'Fatal condition detected',
             'tier_locked': True
         }
 
     if flags.get('debt_disputed', False):
+        # Apply a floor: score cannot exceed 55 when debt is disputed
+        adjusted = min(base, 55)
         return {
             'tier': 'HIGH_RISK',
             'status': 'SUBSTANTIVE DEFENCE RISK',
-            'score': 40,
+            'score': adjusted,
             'recommendation': 'ADDRESS DEBT DISPUTE',
-            'reason': 'Enforceable debt challenged - MINIMUM HIGH RISK LOCKED',
+            'reason': 'Enforceable debt challenged — score capped at 55',
             'tier_locked': True,
             'minimum_tier_enforcement': 'HIGH_RISK cannot be reduced by procedural compliance'
         }
 
     if flags.get('director_inactive_no_averment', False):
+        adjusted = min(base, 50)
         return {
             'tier': 'HIGH_RISK',
             'status': 'SECTION 141 FAILURE',
-            'score': 35,
+            'score': adjusted,
             'recommendation': 'OBTAIN SPECIFIC AVERMENT',
-            'reason': 'Director liability requirements not met - MINIMUM HIGH RISK LOCKED',
+            'reason': 'Director liability requirements not met — score capped at 50',
             'tier_locked': True,
             'minimum_tier_enforcement': 'HIGH_RISK cannot be reduced'
         }
@@ -6954,18 +6970,189 @@ def analyze_defence_risks(case_data: Dict, documentary_result: Dict) -> Dict:
 
 def analyze_cross_examination_risks(case_data: Dict, doc_data: Dict, defence_data: Dict) -> Dict:
     """
-    Cross Examination Risk Analysis
-    Analyzes vulnerability zones for cross-examination
+    Cross Examination Risk Analysis — Deterministic Rule-Based Engine
+    Maps documentary gaps and defence postures to specific cross-exam vulnerabilities.
     """
+    zones = []
+    questions = []
+    risk_score = 0  # higher = more vulnerable to cross-exam
+
+    amount = float(case_data.get('cheque_amount', 0) or 0)
+    has_agreement   = case_data.get('written_agreement_exists', False)
+    has_ledger      = case_data.get('ledger_available', False)
+    has_bank_proof  = case_data.get('bank_statement_proof', False)
+    has_postal      = case_data.get('postal_proof_available', False) or case_data.get('postal_acknowledgment', False)
+    has_ad_card     = case_data.get('ad_card_signed', False)
+    has_orig_cheque = case_data.get('original_cheque_available', False)
+    has_ret_memo    = case_data.get('return_memo_available', False)
+    has_email_sms   = case_data.get('email_sms_evidence', False)
+    has_witness     = case_data.get('witness_available', False)
+    is_cash         = 'cash' in (case_data.get('transaction_mode') or case_data.get('payment_mode') or '').lower()
+    defence_type    = (case_data.get('defence_type') or '').lower()
+    notice_returned = case_data.get('notice_returned_undelivered', False) or case_data.get('notice_not_received', False)
+
+    # Zone 1: Transaction proof — always high risk if no docs
+    if not has_agreement and not has_ledger and not has_bank_proof:
+        risk_score += 35
+        zones.append({
+            'zone': 'Transaction Documentation',
+            'severity': 'CRITICAL',
+            'attack_vector': 'No written proof of debt — defence will ask for every document proving money was actually given',
+            'defence_question': "Is it correct you have no written agreement, ledger entry or bank record of this alleged transaction?"
+        })
+        questions += [
+            'Is it correct that there is no written agreement evidencing the alleged debt?',
+            'On what date exactly did you give money to the accused and in what form?',
+            'Who was present as witness when you gave this money?',
+            'Why did you not insist on a written receipt for such a large amount?',
+        ]
+    elif not has_agreement:
+        risk_score += 20
+        zones.append({
+            'zone': 'Written Agreement',
+            'severity': 'HIGH',
+            'attack_vector': 'No formal written agreement — defence will question the legal character of the transaction',
+            'defence_question': "Is it not a fact that there is no written document signed by the accused acknowledging this debt?"
+        })
+        questions.append('Why was no written agreement executed for a transaction of this amount?')
+        questions.append('Can you produce any document showing the accused agreed to repay this specific amount?')
+
+    # Zone 2: Notice service — always contested
+    if not has_postal and not has_ad_card:
+        risk_score += 25
+        zones.append({
+            'zone': 'Notice Service Proof',
+            'severity': 'CRITICAL' if not has_postal and not has_ad_card else 'HIGH',
+            'attack_vector': 'No postal receipt or AD card — defence will deny receipt of legal notice entirely',
+            'defence_question': "Is it not correct that you cannot produce the AD card signed by the accused acknowledging receipt of your notice?"
+        })
+        questions += [
+            "Do you have the acknowledgment due (AD) card returned bearing the accused's signature?",
+            "How do you prove the accused actually received your legal notice?",
+            'Is it correct that the postal tracking shows the notice was not delivered to the accused personally?',
+        ]
+    elif notice_returned:
+        risk_score += 15
+        zones.append({
+            'zone': 'Notice Delivery — Returned Undelivered',
+            'severity': 'HIGH',
+            'attack_vector': 'Notice returned — accused will deny deemed service applies in this situation',
+            'defence_question': 'Is it correct the postal article was returned with "Not Found / Refused" endorsement?'
+        })
+        questions.append("Was the notice returned undelivered, and if so, did you take any alternative steps to serve the accused?")
+
+    # Zone 3: Cash transactions
+    if is_cash:
+        risk_score += 20
+        zones.append({
+            'zone': 'Cash Transaction',
+            'severity': 'HIGH',
+            'attack_vector': 'Cash transactions are impossible to independently verify — defence will deny any money changed hands',
+            'defence_question': 'Is it not correct that no bank statement or transfer record exists showing money actually paid to accused?'
+        })
+        questions += [
+            'From which bank account did you withdraw this cash to give to the accused?',
+            'Produce your bank passbook/statement showing the withdrawal of this amount.',
+            'Are you aware that cash transactions above ₹20,000 may violate Section 269SS of the Income Tax Act?',
+        ]
+        if amount > 20000:
+            questions.append('Did you file your income tax return declaring this cash loan? Can you produce the ITR?')
+
+    # Zone 4: Security cheque defence
+    if 'security' in defence_type or case_data.get('defence_type') == 'security_cheque':
+        risk_score += 30
+        zones.append({
+            'zone': 'Security Cheque Allegation',
+            'severity': 'CRITICAL',
+            'attack_vector': 'Accused claims cheque was given as security only — will attack the legal character of the cheque',
+            'defence_question': "Is it not a fact that this cheque was given to you as security deposit and not towards discharge of any debt?"
+        })
+        questions += [
+            'Was any condition attached to the encashment of this cheque?',
+            'Did the accused ever give you any other security or guarantee for this transaction?',
+            'On what specific date did the legally enforceable debt arise that this cheque was meant to discharge?',
+            'Is this cheque dated earlier than the debt obligation matured?',
+        ]
+
+    # Zone 5: Dishonour memo
+    if not has_ret_memo:
+        risk_score += 15
+        zones.append({
+            'zone': 'Bank Dishonour Memo',
+            'severity': 'HIGH',
+            'attack_vector': 'No bank memo — defence will challenge whether the cheque was actually dishonoured',
+            'defence_question': "Can you produce the original bank return memo bearing the bank's seal and endorsement?"
+        })
+        questions.append("Where is the original bank return memo issued when the cheque was dishonoured?")
+        questions.append("Was the dishonour memo signed by an authorized bank official with the bank seal?")
+
+    # Zone 6: Original cheque
+    if not has_orig_cheque:
+        risk_score += 20
+        zones.append({
+            'zone': 'Original Cheque',
+            'severity': 'CRITICAL',
+            'attack_vector': 'Original instrument not available — admissibility of copy will be challenged',
+            'defence_question': "Can you produce the ORIGINAL cheque in court, or only a photocopy?"
+        })
+        questions.append('Where is the original cheque? Why are you producing only a photocopy?')
+        questions.append('How do you prove the signature on the photocopy is that of the accused?')
+
+    # Zone 7: electronic evidence without 65B
+    if has_email_sms and not case_data.get('section_65b_certificate', False):
+        risk_score += 10
+        zones.append({
+            'zone': 'Electronic Evidence — Section 65B',
+            'severity': 'MEDIUM',
+            'attack_vector': 'WhatsApp/SMS/email without S.65B certificate is inadmissible — Anvar P.V. v P.K. Basheer (2014)',
+            'defence_question': 'Is it not correct you have not filed a Section 65B certificate authenticating this electronic evidence?'
+        })
+        questions.append("Have you filed a Section 65B certificate authenticating the WhatsApp/SMS/email messages?")
+
+    # Default questions — always asked
+    questions += [
+        'Have you filed any civil suit for recovery of this same amount in any civil court?',
+        'Are there any other disputes pending between you and the accused?',
+        'When did you first demand repayment before sending the legal notice?',
+    ]
+
+    # Deduplicate questions preserving order
+    seen_q = set(); unique_q = []
+    for q in questions:
+        if q not in seen_q:
+            seen_q.add(q); unique_q.append(q)
+
+    # Map risk score to overall_risk label
+    overall_risk = (
+        'CRITICAL' if risk_score >= 60 else
+        'HIGH'     if risk_score >= 40 else
+        'MEDIUM'   if risk_score >= 20 else
+        'LOW'
+    )
+
+    # Preparation checklist
+    prep = []
+    if not has_agreement:
+        prep.append('Locate any WhatsApp/email/SMS acknowledging the debt before cross-examination')
+    if not has_postal:
+        prep.append('Verify postal tracking data and obtain printout before giving evidence')
+    if is_cash:
+        prep.append('Locate bank withdrawal records showing cash was available on transaction date')
+    if not has_witness:
+        prep.append('Identify and prepare any available witness to the transaction')
+
     return {
-        'module': 'Cross Examination Risks',
-        'vulnerability_zones': [],
-        'likely_questions': [],
-        'preparation_required': [],
-        'overall_risk': 'MEDIUM',
-        'complainant_weaknesses': [],
-        'accused_weaknesses': [],
-        'confidence': 0.6
+        'module': 'Cross Examination Risk Analysis',
+        'overall_cross_exam_risk': overall_risk,
+        'overall_risk': overall_risk,
+        'risk_score': risk_score,
+        'vulnerability_zones': zones,
+        'likely_questions': unique_q,
+        'preparation_required': prep,
+        'zone_count': len(zones),
+        'critical_zones': [z for z in zones if z['severity'] == 'CRITICAL'],
+        'confidence': 0.85,
+        'method': 'deterministic_rule_based',
     }
 
 
@@ -11576,52 +11763,136 @@ def generate_plain_summary(analysis: Dict, case_data: Dict) -> Dict:
     case_type = case_data.get('case_type', 'complainant')
     perspective = "Complainant" if case_type == 'complainant' else "Accused"
 
-    # ── Strengths ──
+    # ── Strengths — read from all available data sources ──
     strengths = []
     cat_scores = risk.get('category_scores', {})
-    if cat_scores.get('Timeline Compliance', {}).get('score', 0) >= 80:
-        strengths.append("Timeline compliance is strong (notice and dates are in order)")
-    if cat_scores.get('Ingredient Compliance', {}).get('score', 0) >= 80:
-        strengths.append("All key legal ingredients of Section 138 are present")
+    _res_data = analysis.get('_result', {})
+    _ing_data = analysis.get('modules', {}).get('ingredient_compliance', {}) or {}
+    _doc_data = analysis.get('modules', {}).get('documentary_strength', {}) or {}
+    _tl_data  = analysis.get('modules', {}).get('timeline_intelligence', {}) or {}
+    _pres_data = analysis.get('modules', {}).get('presumption_analysis', {}) or {}
+
+    tl_score  = float(cat_scores.get('Timeline Compliance', {}).get('score', 0) if isinstance(cat_scores.get('Timeline Compliance'), dict) else cat_scores.get('Timeline Compliance', 0) or 0)
+    ing_score = float(cat_scores.get('Ingredient Compliance', {}).get('score', 0) if isinstance(cat_scores.get('Ingredient Compliance'), dict) else cat_scores.get('Ingredient Compliance', 0) or 0)
+    doc_score = float(cat_scores.get('Documentary Strength', {}).get('score', 0) if isinstance(cat_scores.get('Documentary Strength'), dict) else cat_scores.get('Documentary Strength', 0) or 0)
+    li_score  = float(cat_scores.get('Proper Impleading', {}).get('score', 0) if isinstance(cat_scores.get('Proper Impleading'), dict) else cat_scores.get('Proper Impleading', 0) or 0)
+
+    if tl_score >= 80:
+        strengths.append('Timeline compliance is strong — notice sent in time and dates are in order')
+    elif tl_score >= 60:
+        strengths.append('Timeline compliance is adequate — key statutory dates are within limits')
+
+    if ing_score >= 80:
+        strengths.append('All seven key ingredients of Section 138 are substantially in place')
+    elif ing_score >= 60:
+        strengths.append('Core ingredients of Section 138 are present — minor gaps exist')
+
     if case_data.get('return_memo_available'):
-        strengths.append("Dishonour memo available — primary evidence secured")
-    if case_data.get('postal_proof_available'):
-        strengths.append("Postal proof of notice available — service presumption established")
+        strengths.append('Dishonour memo available — primary evidence of dishonour secured')
     if case_data.get('original_cheque_available'):
-        strengths.append("Original cheque available — foundational document secured")
+        strengths.append('Original cheque available — foundational instrument document present')
+    if case_data.get('postal_proof_available') or case_data.get('ad_card_signed'):
+        strengths.append('Postal proof of notice available — statutory service presumption established')
+    if case_data.get('written_agreement_exists'):
+        strengths.append('Written agreement available — debt enforceability is well-documented')
+    if case_data.get('bank_statement_proof') or case_data.get('ledger_available'):
+        strengths.append('Financial records available — independent transaction trail established')
+    if case_data.get('witness_available'):
+        strengths.append('Witness available — oral testimony can corroborate the transaction')
+    if li_score >= 90:
+        strengths.append('Proper Impleading: all required parties correctly named under Section 141')
+    if doc_score >= 70:
+        strengths.append('Documentary strength is good — key documents are in place')
+
+    # Read strengths from executive summary if available
+    _es = analysis.get('executive_summary', {}) or {}
+    for _s in (_es.get('strengths') or [])[:3]:
+        _s_text = str(_s or '').strip()
+        if _s_text and _s_text not in strengths and len(_s_text) > 10:
+            strengths.append(_s_text)
+
     if not strengths:
-        strengths.append("Case ingredients are partially in place")
+        strengths.append('Case ingredients are partially in place — review modules for gaps')
 
-    # ── Weaknesses ──
+    # ── Weaknesses — read from all modules for comprehensive view ──
     weaknesses = []
-    if not case_data.get('written_agreement_exists'):
-        weaknesses.append("No documentary proof of legally enforceable debt — accused can deny or challenge the transaction in court")
-    if not case_data.get('ledger_available'):
-        weaknesses.append("No ledger or financial records — no independent paper trail to corroborate the alleged transaction")
-    if limitation_risk in ['CRITICAL', 'EXPIRED']:
-        weaknesses.append(f"Limitation period issue: {timeline.get('compliance_status', {}).get('limitation', 'check timeline')}")
-    if fatal_defects:
-        for d in fatal_defects[:2]:
-            weaknesses.append(f"Fatal defect: {d.get('defect', 'procedural violation')}")
-    high_risk_defences = defence.get('high_risk_defences', [])
-    if high_risk_defences:
-        weaknesses.append(f"Strong defence exposure: {high_risk_defences[0].get('ground', 'defence argument likely')}")
-    if cat_scores.get('Documentary Strength', {}).get('score', 0) < 50:
-        weaknesses.append("Documentary evidence is weak — transaction proof needs strengthening")
-    if not weaknesses:
-        weaknesses.append("No critical weaknesses detected at this stage")
 
-    # ── One-line verdict ──
+    # Fatal defects first — highest priority
+    _all_res_fatals = _res_data.get('fatal_defects', []) or []
+    for _fd in _all_res_fatals[:3]:
+        _fd_text = str(_fd.get('defect', '') or '').strip()
+        if _fd_text:
+            weaknesses.append(f'FATAL: {_fd_text}')
+
+    # Timeline issues
+    if limitation_risk in ('CRITICAL', 'EXPIRED', 'PREMATURE'):
+        _tl_status = str((_tl_data.get('compliance_status') or {}).get('limitation', 'limitation issue'))
+        weaknesses.append(f'Timeline defect: {_tl_status}')
+
+    # Documentary gaps
+    if not case_data.get('written_agreement_exists'):
+        weaknesses.append('No written agreement — accused can challenge the existence of legally enforceable debt (fundamental S.138 ingredient)')
+    if not case_data.get('ledger_available') and not case_data.get('bank_statement_proof'):
+        weaknesses.append('No financial records — transaction trail is entirely oral and uncorroborated')
+    if not case_data.get('return_memo_available'):
+        weaknesses.append('Bank dishonour memo not available — proof of dishonour may be contestable')
+    if not case_data.get('postal_proof_available') and not case_data.get('ad_card_signed'):
+        weaknesses.append('No postal proof of notice — accused may deny receiving the legal demand')
+    if not case_data.get('original_cheque_available'):
+        weaknesses.append('Original cheque not secured — admissibility of copy may be challenged')
+
+    # Strength-based weaknesses
+    if doc_score < 40:
+        weaknesses.append('Documentary Strength score is critically low — substantial strengthening needed before filing')
+    elif doc_score < 60:
+        weaknesses.append('Documentary evidence is weak — transaction proof requires reinforcement before filing')
+    if tl_score < 50:
+        weaknesses.append('Timeline compliance is below threshold — risk of dismissal on technical grounds')
+    if ing_score < 50:
+        weaknesses.append('Ingredient compliance is below threshold — statutory requirements are not fully satisfied')
+
+    # Defence exposure weaknesses
+    _def_data = analysis.get('modules', {}).get('defence_matrix', {}) or {}
+    _def_possible = _def_data.get('possible_defences', []) or []
+    _high_def = [d for d in _def_possible if d.get('strength_score', 0) >= 60]
+    for _hd in _high_def[:2]:
+        _hd_name = str(_hd.get('defence', _hd.get('type', 'defence argument')) or '')
+        if _hd_name:
+            weaknesses.append(f'Strong defence exposure: {_hd_name} — prepare counter-evidence')
+
+    # Executive summary weaknesses
+    _es_weak = (_es.get('weaknesses') or [])
+    for _w in _es_weak[:2]:
+        _w_text = str(_w or '').strip()
+        if _w_text and _w_text not in weaknesses and len(_w_text) > 10:
+            weaknesses.append(_w_text)
+
+    if not weaknesses:
+        weaknesses.append('No critical weaknesses detected — case appears adequately positioned')
+
+    # ── One-line verdict (thresholds match deriveFilingStatus in frontend) ──
     if fatal_flag:
-        one_line = ( f"⛔ Case has a fatal procedural defect — filing not advisable until resolved. " f" " )
+        _primary_fd = str((analysis.get('_result') or {}).get('primary_fatal_defect') or {})
+        _fd_text = str((analysis.get('_result', {}) or {}).get('primary_fatal_defect', {}) or {})
+        _fd_msg = ''
+        try:
+            _fd_obj = (analysis.get('_result') or {}).get('primary_fatal_defect') or {}
+            if isinstance(_fd_obj, dict):
+                _fd_msg = _fd_obj.get('defect', '')
+        except Exception:
+            pass
+        one_line = (
+            f"⛔ Case is NOT maintainable — {_fd_msg}." if _fd_msg else
+            "⛔ Case has a fatal defect — do not file until the issue is resolved."
+        )
     elif score >= 75:
-        one_line = ( f"✅ Strong case — statutory requirements largely satisfied. " f" Address minor documentary gaps before filing." )
-    elif score >= 60:
-        one_line = ( f"⚠️ Case is legally valid but weak due to lack of documentary proof. " f" Strengthen documentation before filing." )
-    elif score >= 40:
-        one_line = ( f"🔴 Weak case — significant evidentiary and procedural gaps. " f" Substantial remediation required." )
+        one_line = "✅ Strong case — statutory requirements are substantially satisfied. Proceed to file after final document review."
+    elif score >= 55:
+        one_line = "⚠️ Case is valid but has evidentiary gaps — strengthen documentary proof before filing for better conviction prospects."
+    elif score >= 35:
+        one_line = "🔴 Weak case — significant evidentiary and procedural gaps require remediation before filing."
     else:
-        one_line = ( f"⛔ Very weak case — multiple critical deficiencies. " f" Do not file without major remediation." )
+        one_line = "⛔ Very weak case — multiple critical deficiencies make filing highly inadvisable without major remediation."
 
     # ── Recommendation ──
     settlement_data = analysis.get('modules', {}).get('settlement_intelligence', {})
@@ -14553,13 +14824,23 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
 
         final_tier = pure_escalation_engine(escalation_flags)
 
-        analysis_report['final_tier'] = final_tier['tier']
-        analysis_report['final_status'] = final_tier['status']
-        analysis_report['final_score'] = final_tier['score']
-        analysis_report['final_recommendation'] = final_tier['recommendation']
-        analysis_report['tier_locked'] = final_tier.get('tier_locked', False)
+        analysis_report['final_tier']            = final_tier['tier']
+        analysis_report['final_status']          = final_tier['status']
+        analysis_report['final_score']           = final_tier['score']
+        analysis_report['final_recommendation']  = final_tier['recommendation']
+        analysis_report['tier_locked']           = final_tier.get('tier_locked', False)
         analysis_report['minimum_tier_enforcement'] = final_tier.get('minimum_tier_enforcement')
         analysis_report['deterministic_escalation'] = True
+        # ── FIX: feed escalation-adjusted score back into risk module
+        # so _result builder reads one consistent number everywhere
+        if final_tier.get('tier_locked') and 'risk_assessment' in analysis_report.get('modules', {}):
+            _pre_esc = analysis_report['modules']['risk_assessment'].get('overall_risk_score', 0)
+            _post_esc = final_tier['score']
+            if abs(_pre_esc - _post_esc) > 5:  # only update if meaningful difference
+                analysis_report['modules']['risk_assessment']['overall_risk_score'] = _post_esc
+                analysis_report['modules']['risk_assessment']['_escalation_applied'] = True
+                analysis_report['modules']['risk_assessment']['_pre_escalation_score'] = _pre_esc
+                logger.info(f"   Escalation feedback: {_pre_esc:.1f} → {_post_esc:.1f} (tier locked: {final_tier['tier']})")
 
         analysis_report['audit_log']['escalation_flags'] = escalation_flags
         analysis_report['audit_log']['final_tier_assigned'] = final_tier['tier']
