@@ -5847,9 +5847,9 @@ def calculate_overall_risk_score(
 
     weights = get_centralized_weights()
 
-    if timeline_data['limitation_risk'] == 'LOW':
+    if timeline_data.get('limitation_risk', 'UNKNOWN') == 'LOW':
         timeline_score = 95
-    elif timeline_data['limitation_risk'] == 'MEDIUM':
+    elif timeline_data.get('limitation_risk', 'UNKNOWN') == 'MEDIUM':
         timeline_score = 60
     else:
         timeline_score = 20
@@ -5874,7 +5874,7 @@ def calculate_overall_risk_score(
     }
     risk_model['risk_breakdown']['timeline_risk'] = int((100 - timeline_score) * weights['timeline'])
 
-    ingredient_score = normalize_score(ingredient_data['overall_compliance'])
+    ingredient_score = normalize_score(ingredient_data.get('overall_compliance', 0))
     ingredient_score = cap_score_realistic(ingredient_score, max_cap=98.0)
     risk_model['category_scores']['Ingredient Compliance'] = {
         'score': ingredient_score,
@@ -5883,7 +5883,7 @@ def calculate_overall_risk_score(
     }
     risk_model['risk_breakdown']['ingredient_risk'] = int((100 - ingredient_score) * weights['ingredients'])
 
-    doc_score = normalize_score(doc_data['overall_strength_score'])
+    doc_score = normalize_score(doc_data.get('overall_strength_score', 0))
     doc_score = cap_score_realistic(doc_score, max_cap=98.0)
     risk_model['category_scores']['Documentary Strength'] = {
         'score': doc_score,
@@ -11171,8 +11171,8 @@ def get_time_sensitivity(analysis: Dict, case_data: Dict) -> Dict:
             elif days_left <= 30:
                 alerts.append({'level': 'MEDIUM', 'message': f'📅 {days_left} days remaining to file complaint'})
                 if urgency_level == 'NORMAL': urgency_level = 'MEDIUM'
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as _e:
+            logger.debug(f'Time sensitivity urgency calc suppressed: {_e}')
 
     # ── Notice deadline (if not yet sent) ────────────────────────────────────
     if not case_data.get('notice_date') and case_data.get('dishonour_date'):
@@ -11613,30 +11613,15 @@ def generate_plain_summary(analysis: Dict, case_data: Dict) -> Dict:
 
     # ── One-line verdict ──
     if fatal_flag:
-        one_line = (
-            f"⛔ Case has a fatal procedural defect — filing not advisable until resolved. "
-            f"Risk score: {score:.0f}/100."
-        )
+        one_line = ( f"⛔ Case has a fatal procedural defect — filing not advisable until resolved. " f" " )
     elif score >= 75:
-        one_line = (
-            f"✅ Strong case — statutory requirements largely satisfied. "
-            f"Risk score: {score:.0f}/100. Address minor documentary gaps before filing."
-        )
+        one_line = ( f"✅ Strong case — statutory requirements largely satisfied. " f" Address minor documentary gaps before filing." )
     elif score >= 60:
-        one_line = (
-            f"⚠️ Case is legally valid but weak due to lack of documentary proof. "
-            f"Risk score: {score:.0f}/100. Strengthen documentation before filing."
-        )
+        one_line = ( f"⚠️ Case is legally valid but weak due to lack of documentary proof. " f" Strengthen documentation before filing." )
     elif score >= 40:
-        one_line = (
-            f"🔴 Weak case — significant evidentiary and procedural gaps. "
-            f"Risk score: {score:.0f}/100. Substantial remediation required."
-        )
+        one_line = ( f"🔴 Weak case — significant evidentiary and procedural gaps. " f" Substantial remediation required." )
     else:
-        one_line = (
-            f"⛔ Very weak case — multiple critical deficiencies. "
-            f"Risk score: {score:.0f}/100. Do not file without major remediation."
-        )
+        one_line = ( f"⛔ Very weak case — multiple critical deficiencies. " f" Do not file without major remediation." )
 
     # ── Recommendation ──
     settlement_data = analysis.get('modules', {}).get('settlement_intelligence', {})
@@ -11693,7 +11678,8 @@ def generate_plain_summary(analysis: Dict, case_data: Dict) -> Dict:
         'one_line_verdict': one_line or 'Analysis complete — see details below',
         'perspective': perspective or 'Not specified',
         'cheque_amount': f"₹{indian_number_format(amount)}" if amount else 'Not specified',
-        'risk_score': f"{score:.1f}/100",
+        'score_display': f"{score:.1f}/100",
+        'risk_score': round(score, 1),
         'case_classification': compliance or 'Assessment Pending',
         'strengths': strengths or ['Analysis complete'],
         'weaknesses': weaknesses or ['Review full analysis for details'],
@@ -13574,6 +13560,7 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         logger.info("💰 Analyzing Income Tax 269SS Compliance...")
         income_tax_269ss = analyze_income_tax_269ss_compliance(case_data)
         analysis_report['modules']['income_tax_269ss'] = income_tax_269ss
+        analysis_report['modules']['income_tax_269ss_compliance'] = income_tax_269ss  # alias for frontend
 
         # NEW MODULE: Notice Delivery Status
         logger.info("📬 Analyzing Notice Delivery Status...")
@@ -15073,6 +15060,8 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
                 'next_actions':          [],
                 'presumption_stage':     'INSUFFICIENT DATA',
                 'burden_position':       'See analysis',
+                'conviction_probability': 'N/A',
+                'conviction_probability_display': 'Not calculable — fatal defect present' if bool(analysis_report.get('fatal_flag')) else 'See analysis',
             }
 
         # ── FLAT KEY ALIASES ─────────────────────────────────────────────────
@@ -15332,12 +15321,19 @@ async def kb_status():
 
 @app.get("/health")
 async def health():
+    import os
+    db_ok = False
+    try:
+        conn = sqlite3.connect(analytics_db_path)
+        conn.execute("SELECT 1"); conn.close(); db_ok = True
+    except Exception: pass
     return {
         "status": "healthy",
-        "version": "5.0.0",
-        "platform": "Legal Intelligence Platform",
+        "version": ENGINE_VERSION,
+        "platform": "JUDIQ AI — Section 138 NI Act Legal Intelligence",
         "kb_loaded": kb_loaded,
         "kb_provisions": len(kb_data) if kb_loaded else 0,
+        "db_status": "ok" if db_ok else "unavailable",
         "llm_enhancement": False,  # LLM disabled on Render
         "embed_model": False,  # embedding disabled on Render
         "database": str(analytics_db_path),
@@ -16073,10 +16069,15 @@ async def analyze_case(request: CaseAnalysisRequest, http_request: Request = Non
         return {
             "success": False,
             "error": "Critical analysis error",
-            "error_message": str(e),
             "error_type": type(e).__name__,
+            "error_message": str(e),
+            "message": "Analysis could not be completed. The error has been logged.",
+            "partial_result": {
+                "overall_score": 0,
+                "fatal_flag": True,
+                "filing_status": "ANALYSIS ERROR — retry or check inputs",
+            },
             "audit_trail": audit.get_trail() if 'audit' in locals() else {},
-            "message": "Analysis could not be completed. System logged error for review."
         }
 
 @app.post("/search-knowledge-base")
