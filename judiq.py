@@ -11192,8 +11192,8 @@ def get_time_sensitivity(analysis: Dict, case_data: Dict) -> Dict:
             elif nd_left <= 7:
                 alerts.append({'level': 'CRITICAL', 'message': f'🚨 Only {nd_left} day(s) left to send legal notice — send TODAY'})
                 urgency_level = 'CRITICAL'
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug(f"Non-critical exception suppressed: {_e}")
 
     # ── 143A interim compensation opportunity ─────────────────────────────────
     if case_data.get('complaint_filed_date') and not case_data.get('interim_compensation_applied'):
@@ -11217,8 +11217,8 @@ def get_time_sensitivity(analysis: Dict, case_data: Dict) -> Dict:
             if dd_left <= 14:
                 alerts.append({'level': 'URGENT', 'message': f'⚠️ Section 148 deposit due in {dd_left} days — deposit to suspend sentence'})
                 if urgency_level == 'NORMAL': urgency_level = 'URGENT'
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug(f"Non-critical exception suppressed: {_e}")
 
     top_alert = alerts[0]['message'] if alerts else 'No urgent deadlines detected'
 
@@ -12675,8 +12675,8 @@ def analyze_delay_condonation(case_data: Dict, timeline_result: Dict) -> Dict:
         delay_match = _re.search(r'(\d+)\s*days?\s*(late|delayed|after)', limitation_status.lower())
         if delay_match:
             result['delay_days'] = int(delay_match.group(1))
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.debug(f"Non-critical exception suppressed: {_e}")
 
     result['legal_standard'] = (
         'Section 142(b) NI Act: Complaint must be filed within 1 month of cause of action. '
@@ -13101,8 +13101,8 @@ def analyze_fraud_signals(case_data: Dict) -> Dict:
                     'check':    'Verify: was cheque given for specific purpose/date? Is there correspondence showing original purpose?'
                 })
                 score += 15
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug(f"Non-critical exception suppressed: {_e}")
 
     # Signal 4: Signature mismatch signals
     dishonour = (case_data.get('dishonour_reason') or '').lower()
@@ -13755,8 +13755,8 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
                         defence_result['high_risk_defences'] = []
                     defence_result['high_risk_defences'].insert(0, premature_defence)
                     defence_result['premature_complaint_defence'] = True
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug(f"Non-critical exception suppressed: {_e}")
 
         analysis_report['modules']['defence_matrix'] = defence_result
         analysis_report['architecture']['deterministic_modules'].append('Defence Vulnerability')
@@ -15055,8 +15055,25 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         except Exception as _e:
             logger.error(f'❌ _result building failed: {_e}')
             import traceback as _tb2; logger.error(_tb2.format_exc())
-            analysis_report['_result'] = {'overall_score': analysis_report.get('risk_score', 0), 'is_fatal': bool(analysis_report.get('fatal_flag')), 'filing_status': 'See analysis', 'processing_time': f"{round(time.time() - start_time, 2) if 'start_time' in locals() else 1.2:.2f}s", 'documentary_gaps': [], 'cross_exam_questions': [], 'next_actions': [], 'presumption_stage': 'INSUFFICIENT DATA', 'burden_position': 'INSUFFICIENT DATA', 'court_name': 'Not specified', 'court_confidence': 'INSUFFICIENT DATA', 'court_note': 'Judicial behaviour analysis unavailable — insufficient court data.', 'capped_at': 0, 'capped_at_display': 'DATA NOT AVAILABLE', 'original_score': analysis_report.get('risk_score', 0), 'fatal_override_note': 'DATA NOT AVAILABLE'}
-        logger.info(f"✅ Central result object built: {len(analysis_report['_result'])} fields")
+            # _result fallback: use canonical score from whichever path computed it
+            _fb_score = (
+                analysis_report.get('overall_score') or
+                analysis_report.get('risk_score') or
+                (analysis_report.get('modules', {}).get('risk_assessment', {}).get('overall_risk_score') or 0)
+            )
+            analysis_report['_result'] = {
+                'overall_score':         round(float(_fb_score), 1),
+                'overall_score_display': f'{round(float(_fb_score), 1):.1f}/100',
+                'is_fatal':              bool(analysis_report.get('fatal_flag')),
+                'fatal_defects_count':   len(analysis_report.get('fatal_defects', [])),
+                'filing_status':         'DO NOT FILE' if analysis_report.get('fatal_flag') else 'See analysis',
+                'processing_time':       f"{round(time.time() - start_time, 2) if 'start_time' in locals() else 1.2:.2f}s",
+                'documentary_gaps':      [],
+                'cross_exam_questions':  [],
+                'next_actions':          [],
+                'presumption_stage':     'INSUFFICIENT DATA',
+                'burden_position':       'See analysis',
+            }
 
         # ── FLAT KEY ALIASES ─────────────────────────────────────────────────
         # Frontend reads analysis.timeline, analysis.ingredients etc.
@@ -15965,15 +15982,42 @@ async def analyze_case(request: CaseAnalysisRequest, http_request: Request = Non
             _am.get('risk_assessment', {}).get('overall_risk_score', 0) or
             analysis.get('risk_score', 0))
 
+        # ── Canonical score: single source of truth ─────────────────────
+        _result_obj   = analysis.get('_result', {})
+        _canon_score  = float(
+            _result_obj.get('overall_score') or
+            analysis.get('overall_score') or
+            analysis.get('risk_score') or
+            (analysis.get('modules', {}).get('risk_assessment', {}).get('overall_risk_score') or 0)
+        )
+        _canon_fatal  = bool(
+            _result_obj.get('is_fatal') or
+            analysis.get('fatal_flag') or False
+        )
+        # Stamp analysis_timestamp so frontend library display works
+        if not analysis.get('analysis_timestamp'):
+            analysis['analysis_timestamp'] = datetime.utcnow().isoformat() + 'Z'
+        # Expose case_metadata for auto-fill
+        if not analysis.get('case_metadata'):
+            analysis['case_metadata'] = {k: v for k, v in case_data.items()
+                                          if not k.startswith('_')}
+
         return {
             "success": True,
-            "case_id": analysis['case_id'],
-            # ── Quick read (lawyers read these first) ──────────────────
+            "case_id":            analysis['case_id'],
+            "analysis_timestamp": analysis['analysis_timestamp'],
+
+            # ── Single canonical score (frontend must use these) ─────────
+            "overall_score":  _canon_score,
+            "fatal_flag":     _canon_fatal,
+            "risk_score":     _canon_score,   # alias for legacy reads
+
+            # ── Quick-read summary (lawyers read these first) ────────────
             "plain_summary":     plain_summary,
             "executive_summary": analysis.get('executive_summary', {}),
-            "report":            analysis.get('professional_report', {}),
-            "result":            analysis.get('_result', {}),
-            # ── Flat module aliases (frontend shortcut keys) ───────────
+            "result":            _result_obj,
+
+            # ── Flat module aliases (frontend shortcut keys) ─────────────
             "timeline":          analysis.get('timeline', {}),
             "ingredients":       analysis.get('ingredients', {}),
             "documentary":       analysis.get('documentary', {}),
@@ -15982,47 +16026,41 @@ async def analyze_case(request: CaseAnalysisRequest, http_request: Request = Non
             "cross_examination": analysis.get('cross_examination', {}),
             "settlement":        analysis.get('settlement', {}),
             "judicial":          analysis.get('judicial', {}),
-            "risk_assessment":     analysis.get('risk_assessment', {}),
-            "overall_score":       analysis.get('overall_score', 0),
-            # Deep legal intelligence modules
+            "risk_assessment":   analysis.get('risk_assessment', {}),
+            "presumption":       analysis.get('presumption', {}),
+
+            # ── Deep intelligence modules ────────────────────────────────
             "dishonour_analysis":  analysis.get('dishonour_analysis', {}),
             "enforceable_debt":    analysis.get('enforceable_debt', {}),
             "delay_condonation":   analysis.get('delay_condonation', {}),
             "drafting_compliance": analysis.get('drafting_compliance', {}),
             "document_validity":   analysis.get('document_validity', {}),
             "fraud_signals":       analysis.get('fraud_signals', {}),
-            # ── Full detail ────────────────────────────────────────────
-            "analysis": analysis,
-            "api_response_time_ms": round((time.time() - start) * 1000, 1),
-            "engine_version": ENGINE_VERSION,
-            "maturity_grade": "Production Stable",
-            # ── SINGLE SOURCE OF TRUTH (frontend must use these) ─────
-            "single_truth":         analysis.get('single_truth', {}),
-            "decision_narrative":   analysis.get('decision_narrative', []),
-            "processing_flags":     analysis.get('processing_flags', {}),
-            # ── Input sanity pre-check result ──────────────────────────
-            "input_sanity_pre":     case_data.get('_sanity_check', {}),
-            "sanity_warnings":      case_data.get('_sanity_warnings', []),
 
-            "processing_flags":      analysis.get('processing_flags', {}),
+            # ── Layer-12 intelligence shortcuts ─────────────────────────
+            "decision_confidence": plain_summary.get('decision_confidence', {}),
+            "contradictions":      plain_summary.get('contradictions', {}),
+            "legal_basis_map":     plain_summary.get('legal_basis_map', {}),
+            "outcome_scenarios":   plain_summary.get('outcome_scenarios', {}),
+            "evidence_gaps":       plain_summary.get('evidence_gap_priority', {}),
+            "time_sensitivity":    plain_summary.get('time_sensitivity', {}),
+            "defence_counters":    plain_summary.get('defence_counters', {}),
+            "module_confidence":   plain_summary.get('module_confidence', {}),
 
-            # ── Input sanity (always exposed) ─────────────────────────────
-            "input_sanity_pre":  case_data.get('_sanity_check', {}),
-            # ── Pipeline trace (explainability backbone) ───────────────────
+            # ── Explainability / pipeline ────────────────────────────────
             "decision_trace":    analysis.get('decision_trace', []),
             "processing_flags":  analysis.get('processing_flags', {}),
             "pipeline_phases":   analysis.get('audit_log', {}).get('phases_executed', []),
-            # ── Layer 12 shortcuts ─────────────────────────────────────────
-            "decision_confidence":   plain_summary.get('decision_confidence', {}),
-            "contradictions":        plain_summary.get('contradictions', {}),
-            "legal_basis_map":       plain_summary.get('legal_basis_map', {}),
-            "outcome_scenarios":     plain_summary.get('outcome_scenarios', {}),
-            "evidence_gaps":         plain_summary.get('evidence_gap_priority', {}),
-            "time_sensitivity":      plain_summary.get('time_sensitivity', {}),
-            "input_sanity":          plain_summary.get('input_sanity', {}),
-            "defence_counters":      plain_summary.get('defence_counters', {}),
-            "module_confidence":     plain_summary.get('module_confidence', {}),
+            "sanity_warnings":   case_data.get('_sanity_warnings', []),
+            "input_sanity":      plain_summary.get('input_sanity', {}),
 
+            # ── Full analysis object (contains .modules, ._result, etc.) ─
+            "analysis": analysis,
+
+            # ── Meta ────────────────────────────────────────────────────
+            "api_response_time_ms": round((time.time() - start) * 1000, 1),
+            "engine_version":       ENGINE_VERSION,
+            "maturity_grade":       "Production Stable",
         }
 
     except Exception as e:
