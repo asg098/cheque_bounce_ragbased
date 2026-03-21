@@ -16976,6 +16976,14 @@ async def analyze_case(request: CaseAnalysisRequest, http_request: Request = Non
         _next_actions = _exec_summary.get('next_actions', [])
         _top_summary = _exec_summary.get('top_summary', '')
         
+        # Extract Layer 12 intelligence fields
+        _decision_conf = plain_summary.get('decision_confidence', {})
+        _contradictions = plain_summary.get('contradictions', {})
+        _evidence_gaps = plain_summary.get('evidence_gap_priority', {})
+        _defence_counters = plain_summary.get('defence_counters', {})
+        _module_confidence = plain_summary.get('module_confidence', {})
+        _outcome_scenarios = plain_summary.get('outcome_scenarios', {})
+        
         # Determine clean status
         if _canon_fatal:
             _clean_status = "FATAL - DO NOT FILE"
@@ -17004,6 +17012,15 @@ async def analyze_case(request: CaseAnalysisRequest, http_request: Request = Non
             "documentary_strength": _doc_context,
             "key_issue": _primary_issue,
             "next_actions": _next_actions[:5] if _next_actions else [],
+            
+            # ── INTELLIGENCE MODULES (STEP 7) ────────────────────────────
+            "decision_confidence": _decision_conf,
+            "contradictions": _contradictions,
+            "evidence_gaps": _evidence_gaps,
+            "defence_counters": _defence_counters,
+            "module_confidence": _module_confidence,
+            "outcome_scenarios": _outcome_scenarios,
+            "procedural_defects": analysis.get('modules', {}).get('procedural_defects', {}),
             
             # ── Legacy fields ─────────────────────────────────────────────
             "case_id":            analysis['case_id'],
