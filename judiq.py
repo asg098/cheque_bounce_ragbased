@@ -16646,6 +16646,19 @@ def _build_flat_report(a: dict) -> dict:
     weaknesses = exec_s.get('weaknesses') or R.get('weaknesses') or ['Review full analysis']
 
     return sanitize_module_output({
+        # ===== CASE DETAILS (NEW - For professional reports) =====
+        'case_details': {
+            'complainant_name':  _s(a.get('complainant_name', '')),
+            'accused_name':      _s(a.get('accused_name', '')),
+            'lawyer_name':       _s(a.get('lawyer_name', '')),
+            'case_number':       _s(a.get('case_number', '')),
+            'court_name':        _s(a.get('court_name', '')),
+            'platform_name':     'JUDIQ Legal',
+            'platform_tagline':  'Section 138 Legal Intelligence',
+            'generated_by':      'JUDIQ AI - Advanced Legal Analysis Engine',
+        },
+        
+        # ===== CORE IDENTIFIERS =====
         'case_id':                _s(a.get('case_id')),
         'generated_date':         _s(a.get('analysis_timestamp', '')[:10]),
         'engine_version':         _s(a.get('engine_version'), 'v10.0'),
