@@ -18,7 +18,7 @@ services:
       #      https://drive.google.com/file/d/1btile_wGE2pjmU_gvm3ZwF-ufB246x5A/view
       #   4. Paste it below (replace 1btile_wGE2pjmU_gvm3ZwF-ufB246x5A)
       - key: GDRIVE_FILE_ID
-        value: 1btile_wGE2pjmU_gvm3ZwF-ufB246x5A
+        value: 1DfejIbgRXco3Tpp_aTBfarIm7h3t32EVykJGkEFdee4
 
       # OPTIONAL: Google Drive API key for faster / more reliable downloads
       # Get one free at: https://console.cloud.google.com/ → APIs → Drive API → Credentials
