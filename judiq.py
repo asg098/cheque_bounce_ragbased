@@ -6068,7 +6068,7 @@ def calculate_overall_risk_score(
 
     risk_model = {
         'category_scores': {},
-        'overall_risk_score': 0,
+        'final_score': 0,
         'risk_breakdown': {},
         'compliance_level': '',
         'critical_issues': [],
@@ -6159,9 +6159,9 @@ def calculate_overall_risk_score(
 
     total_weighted = round(sum(cat['weighted_score'] for cat in risk_model['category_scores'].values()), 1)
 
-    risk_model['overall_risk_score'] = normalize_score(total_weighted)
+    risk_model['final_score'] = normalize_score(total_weighted)
 
-    risk_model['overall_risk_score'] = cap_score_realistic(risk_model['overall_risk_score'], max_cap=98.0)
+    risk_model['final_score'] = cap_score_realistic(risk_model['final_score'], max_cap=98.0)
 
     all_fatal_defects = []
 
@@ -6208,8 +6208,8 @@ def calculate_overall_risk_score(
             # Same-day filing: HIGH risk, interpretation-dependent, NOT fatal
             # Do NOT add to all_fatal_defects — apply score penalty only
             _same_day_penalty = round(total_weighted * 0.12, 1)  # 12% penalty
-            risk_model['overall_risk_score'] = round(
-                max(35, (risk_model.get('overall_risk_score') or total_weighted) - _same_day_penalty), 1
+            risk_model['final_score'] = round(
+                max(35, (risk_model.get('final_score') or total_weighted) - _same_day_penalty), 1
             )
             risk_model['same_day_filing_penalty'] = _same_day_penalty
             risk_model['same_day_filing_risk'] = 'HIGH — interpretation-dependent procedural risk'
@@ -6255,7 +6255,7 @@ def calculate_overall_risk_score(
     risk_model['has_fatal_defects'] = len(all_fatal_defects) > 0
 
     # ── Dismissal / conviction probability ──
-    _score = risk_model.get('overall_risk_score', 0) or 0
+    _score = risk_model.get('final_score', 0) or 0
     _fatal = len(all_fatal_defects) > 0
     if _fatal or _score < 25:
         _prob_label   = 'Very High likelihood of dismissal (>90%)'
@@ -6307,7 +6307,7 @@ def calculate_overall_risk_score(
     # ── Score cap explanation (lawyers need to understand WHY the score is low) ──
     # total_weighted is always defined above — use it directly
     _base = round(total_weighted, 1)
-    _final = round(risk_model.get('overall_risk_score', 0), 1)
+    _final = round(risk_model.get('final_score', 0), 1)
     _cap_val = FATAL_CAP_UNIFIED if all_fatal_defects else None
 
     # Build per-category contribution table
@@ -6382,29 +6382,29 @@ def calculate_overall_risk_score(
         '65–80: Good' if _final < 80 else
         '80–100: Strong'
     )
-    # Fix 16: Round all scores to 1 decimal — prevent 61.528571428571425
-    risk_model['overall_risk_score'] = round(_final, 1)
+    # Lock final score - round to 1 decimal
+    risk_model['final_score'] = round(_final, 1)
 
     if all_fatal_defects:
-        original_score = risk_model['overall_risk_score']
+        original_score = risk_model['final_score']
         final_score, override_details = apply_weighted_fatal_override(
-            risk_model['overall_risk_score'],
+            risk_model['final_score'],
             all_fatal_defects
         )
-        risk_model['overall_risk_score'] = final_score
+        risk_model['final_score'] = final_score
 
         if override_details['applied']:
             risk_model['fatal_defect_override'] = override_details
 
     if all_fatal_defects:
         hard_override_score, hard_override_reason = apply_hard_fatal_override(
-            risk_model['overall_risk_score'],
+            risk_model['final_score'],
             all_fatal_defects
         )
 
         if hard_override_reason != "NO_OVERRIDE":
-            if hard_override_score < risk_model['overall_risk_score']:
-                risk_model['overall_risk_score'] = hard_override_score
+            if hard_override_score < risk_model['final_score']:
+                risk_model['final_score'] = hard_override_score
                 risk_model['hard_fatal_override'] = {
                     'applied': True,
                     'reason': hard_override_reason,
@@ -6439,22 +6439,22 @@ def calculate_overall_risk_score(
     if procedural_fatal_count >= 2:
         fatal_defect_override = True
         override_reason.append(f'{procedural_fatal_count} fatal procedural defects — technical dismissal likely')
-        risk_model['overall_risk_score'] = min(risk_model['overall_risk_score'], 30)
+        risk_model['final_score'] = min(risk_model['final_score'], 30)
     elif procedural_fatal_count == 1 and (defect_data.get('overall_risk', '').startswith('CRITICAL')
                                            or defect_data.get('overall_risk', '').startswith('HIGH')):
         fatal_defect_override = True
         override_reason.append('Fatal procedural defect detected')
-        risk_model['overall_risk_score'] = min(risk_model['overall_risk_score'], 40)
+        risk_model['final_score'] = min(risk_model['final_score'], 40)
     elif procedural_high_count >= 1:
         # HIGH risk procedural (e.g. same-day) — apply moderate reduction, not hard cap
-        _high_reduction = round(risk_model.get('overall_risk_score', 0) * 0.20, 1)
-        risk_model['overall_risk_score'] = round(
-            max(25, risk_model.get('overall_risk_score', 0) - _high_reduction), 1
+        _high_reduction = round(risk_model.get('final_score', 0) * 0.20, 1)
+        risk_model['final_score'] = round(
+            max(25, risk_model.get('final_score', 0) - _high_reduction), 1
         )
         override_reason.append(f'High procedural risk — {_high_reduction:.1f} point reduction applied')
 
     if fatal_defect_override:
-        _capped_at = risk_model['overall_risk_score']
+        _capped_at = risk_model['final_score']
         risk_model['fatal_defect_override'] = {
             'applied': True,
             'original_weighted_score': round(total_weighted, 1),
@@ -6469,25 +6469,25 @@ def calculate_overall_risk_score(
             'warning': 'Despite strong scores in other areas, fatal defects make case unviable'
         }
 
-        if risk_model['overall_risk_score'] <= 20:
+        if risk_model['final_score'] <= 20:
             risk_model['compliance_level'] = ComplianceLevel.CRITICAL
             risk_model['confidence_level'] = 'CERTAIN FAILURE - Fatal defects present'
             risk_model['score_interpretation'] = 'VERY WEAK (0-30): Case will almost certainly fail without addressing fatal defects'
-        elif risk_model['overall_risk_score'] <= 40:
+        elif risk_model['final_score'] <= 40:
             risk_model['compliance_level'] = ComplianceLevel.CRITICAL
             risk_model['confidence_level'] = 'Very high risk - Critical defects likely fatal'
     else:
 
-        if (risk_model.get('overall_risk_score') or 0) >= 90:
+        if (risk_model.get('final_score') or 0) >= 90:
             risk_model['compliance_level'] = ComplianceLevel.EXCELLENT
             risk_model['confidence_level'] = 'Very high confidence in case strength'
-        elif (risk_model.get('overall_risk_score') or 0) >= 75:
+        elif (risk_model.get('final_score') or 0) >= 75:
             risk_model['compliance_level'] = ComplianceLevel.GOOD
             risk_model['confidence_level'] = 'High confidence in case strength'
-        elif (risk_model.get('overall_risk_score') or 0) >= 60:
+        elif (risk_model.get('final_score') or 0) >= 60:
             risk_model['compliance_level'] = ComplianceLevel.MODERATE
             risk_model['confidence_level'] = 'Moderate confidence - some weaknesses present'
-        elif (risk_model.get('overall_risk_score') or 0) >= 40:
+        elif (risk_model.get('final_score') or 0) >= 40:
             risk_model['compliance_level'] = ComplianceLevel.WEAK
             risk_model['confidence_level'] = 'Low confidence - significant risks'
         else:
@@ -6518,17 +6518,17 @@ def calculate_overall_risk_score(
         retrieval_strength=0.75
     )
 
-    # CRITICAL: Guarantee overall_risk_score is always a valid number
-    if 'overall_risk_score' not in risk_model or risk_model['overall_risk_score'] is None:
-        logger.error("overall_risk_score was None or missing - defaulting to 0")
-        risk_model['overall_risk_score'] = 0
+    # CRITICAL: Guarantee final_score is always a valid number
+    if 'final_score' not in risk_model or risk_model['final_score'] is None:
+        logger.error("final_score was None or missing - defaulting to 0")
+        risk_model['final_score'] = 0
 
     # Ensure it's a number
     try:
-        risk_model['overall_risk_score'] = float(risk_model['overall_risk_score'])
+        risk_model['final_score'] = float(risk_model['final_score'])
     except (TypeError, ValueError):
-        logger.error(f"overall_risk_score invalid type: {type(risk_model['overall_risk_score'])} - defaulting to 0")
-        risk_model['overall_risk_score'] = 0
+        logger.error(f"final_score invalid type: {type(risk_model['final_score'])} - defaulting to 0")
+        risk_model['final_score'] = 0
 
     return risk_model
 
@@ -6560,7 +6560,7 @@ def analyze_settlement_exposure(case_data: Dict, risk_score_data: Dict) -> Dict:
             'appeal_deposit': f'Minimum 20% of fine/compensation ({cheque_amount * 0.2:.2f}) required for suspension of sentence (Section 148)'
         }
 
-        case_strength = risk_score_data['overall_risk_score']
+        case_strength = risk_score_data['final_score']
         if case_strength < 40:
 
             settlement_analysis['settlement_leverage'] = SettlementPressure.LOW
@@ -6618,7 +6618,7 @@ def analyze_settlement_exposure(case_data: Dict, risk_score_data: Dict) -> Dict:
             'acquittal_scenario': 'No recovery, legal costs incurred'
         }
 
-        if (risk_score_data.get('overall_risk_score') or 0) >= 60:
+        if (risk_score_data.get('final_score') or 0) >= 60:
             settlement_analysis['interim_compensation_eligible'] = True
             settlement_analysis['strategic_options'].append({
                 'option': 'Apply for Interim Compensation (Section 143A)',
@@ -6626,7 +6626,7 @@ def analyze_settlement_exposure(case_data: Dict, risk_score_data: Dict) -> Dict:
                 'financial_impact': f'Receive {cheque_amount * 0.20:.2f} pending trial'
             })
 
-        case_strength = risk_score_data['overall_risk_score']
+        case_strength = risk_score_data['final_score']
         _doc_weak = (risk_score_data.get('category_scores', {}).get('Documentary Strength', {}) or {}).get('score', 100)
         if isinstance(_doc_weak, dict):
             _doc_weak = _doc_weak.get('score', 100)
@@ -8439,7 +8439,7 @@ def generate_executive_summary(
     defence_data   = _d(defence_data)
     cross_exam_data= _d(cross_exam_data)
 
-    score      = _n(risk_data.get('overall_risk_score'))
+    score      = _n(risk_data.get('final_score'))
     compliance = _s(risk_data.get('compliance_level'), 'Assessment Pending')
     amount     = case_data.get('cheque_amount', 0)
     case_type  = "Complainant" if case_data.get('case_type') == 'complainant' else "Accused"
@@ -8589,10 +8589,7 @@ def generate_executive_summary(
     _has_primary = case_data.get('original_cheque_available') and case_data.get('return_memo_available')
     _missing_secondary = not case_data.get('written_agreement_exists') or not case_data.get('ledger_available')
     if _has_primary and _missing_secondary and _doc_score < 60:
-        documentary_context = (
-            "Core instruments present (cheque + dishonour memo), but no documentary proof of legally "
-            "enforceable debt. Accused can challenge the transaction basis."
-        )
+        documentary_context = "No documentary proof of legally enforceable debt."
     elif _doc_score >= 70:
         documentary_context = "Documentary evidence is in reasonable order."
     else:
@@ -8774,23 +8771,20 @@ def generate_executive_summary(
     _doc_s2 = _n(doc_data.get('overall_strength_score', 0))
     if unique_fatals:
         top_summary = (
-            f"Case has a fatal procedural defect — do not file until resolved. "
-            f"Risk score: {score:.0f}/100."
+            f"Case has fatal procedural defect — do not file until resolved. Score: {score}/100."
         )
     elif score >= 75 and _doc_s2 >= 60:
         top_summary = (
-            f"Case is in a strong position to file — statutory requirements largely satisfied. "
-            f"Risk score: {score:.0f}/100."
+            f"Case is in strong position to file — statutory requirements largely satisfied. Score: {score}/100."
         )
     elif score >= 55:
         top_summary = (
-            f"Case is legally valid but weak due to lack of documentary proof of debt. "
-            f"Risk score: {score:.0f}/100. Strengthen documentation before filing."
+            f"Case is legally maintainable but weakened due to lack of documentary proof of debt. "
+            f"Score: {score}/100. Strengthen documentation before filing."
         )
     else:
         top_summary = (
-            f"Case has multiple compliance gaps — significant remediation required before filing. "
-            f"Risk score: {score:.0f}/100."
+            f"Case has multiple compliance gaps — significant remediation required before filing. Score: {score}/100."
         )
 
     return {
@@ -9411,7 +9405,7 @@ def generate_clean_professional_report(analysis: Dict, case_data: Dict) -> Dict:
     judicial    = analysis.get('modules', {}).get('judicial_behavior', {}) or {}
     settlement  = analysis.get('modules', {}).get('settlement_analysis', {}) or {}
 
-    score       = _safe_score(risk.get('overall_risk_score'))
+    score       = _safe_score(risk.get('final_score'))
     fatal_flag  = analysis.get('fatal_flag', False)
 
     # Collect ALL fatal defects from ALL modules
@@ -10082,7 +10076,7 @@ def generate_executive_report(analysis_data: Dict) -> Dict:
     cross_data   = modules.get('cross_examination_risk', {})
     judicial_data= modules.get('judicial_behavior', {})
 
-    score        = risk_data.get('overall_risk_score', 0)
+    score        = risk_data.get('final_score', 0)
     fatal_flag   = analysis_data.get('fatal_flag', False)
     fatal_defects= risk_data.get('fatal_defects', [])
     cat_scores   = risk_data.get('category_scores', {})
@@ -10447,7 +10441,7 @@ def generate_executive_report_legacy(analysis_data: Dict) -> Dict:
                 "cheque_amount": f"₹{analysis_data['case_metadata']['cheque_amount']:,.2f}",
                 "overall_assessment": executive_summary.get('overall_assessment', 'Assessment pending'),
                 "risk_classification": risk_data.get('compliance_level', 'Unknown'),
-                "overall_score": f"{risk_data.get('overall_risk_score', 0):.1f}/100"
+                "overall_score": f"{risk_data.get('final_score', 0):.1f}/100"
             },
 
             "critical_findings": {
@@ -10955,7 +10949,7 @@ def save_analysis_to_db(analysis_report: Dict) -> bool:
             analysis_report.get('analysis_timestamp', ''),
             analysis_report['case_metadata']['case_type'],
             analysis_report['case_metadata'].get('cheque_amount', 0),
-            risk_data.get('overall_risk_score', 0),
+            risk_data.get('final_score', 0),  # FIXED: Use final_score
             normalized_compliance,  # Use normalized value
             1 if analysis_report.get('fatal_flag') else 0,
             analysis_report.get('overall_status', '').split(' - ')[0] if ' - ' in analysis_report.get('overall_status', '') else None,
@@ -11021,7 +11015,7 @@ def get_decision_confidence(analysis: Dict, case_data: Dict) -> Dict:
         cats   = risk.get('category_scores', {}) or {}
         dc     = analysis.get('data_completeness') or calculate_data_completeness(case_data)
         pct    = _safe_f(dc.get('completeness_pct', 0))
-        score  = _safe_f(risk.get('overall_risk_score', 0))
+        score  = _safe_f(risk.get('final_score', 0))
     
         factors = []
         penalty = 0
@@ -11137,7 +11131,7 @@ def get_contradiction_explainer(analysis: Dict, case_data: Dict) -> Dict:
     
         tl_score  = _safe_f((risk.get('category_scores') or {}).get('Timeline Compliance', {}).get('score') if isinstance((risk.get('category_scores') or {}).get('Timeline Compliance'), dict) else 0)
         doc_score = _safe_f((risk.get('category_scores') or {}).get('Documentary Strength', {}).get('score') if isinstance((risk.get('category_scores') or {}).get('Documentary Strength'), dict) else 0)
-        overall   = _safe_f(risk.get('overall_risk_score', 0))
+        overall   = _safe_f(risk.get('final_score', 0))
         fatal     = analysis.get('fatal_flag', False)
         proc_fatals = proc.get('fatal_defects') or []
         lim_status  = str((timeline.get('compliance_status') or {}).get('limitation') or '').upper()
@@ -11333,7 +11327,7 @@ def get_legal_basis_map(analysis: Dict, case_data: Dict) -> Dict:
     try:
         risk     = analysis.get('modules', {}).get('risk_assessment', {}) or {}
         timeline = analysis.get('modules', {}).get('timeline_intelligence', {}) or {}
-        overall  = _safe_f(risk.get('overall_risk_score', 0))
+        overall  = _safe_f(risk.get('final_score', 0))
         fatal    = analysis.get('fatal_flag', False)
         lim_status = str((timeline.get('compliance_status') or {}).get('limitation') or '').upper()
     
@@ -11529,7 +11523,7 @@ def get_outcome_scenarios(analysis: Dict, case_data: Dict) -> Dict:
     defence = analysis.get('modules', {}).get('defence_matrix', {}) or {}
     cats    = risk.get('category_scores', {}) or {}
     _res    = analysis.get('_result', {}) or {}
-    score   = _safe_f(_res.get('overall_score') or risk.get('overall_risk_score', 0))
+    score   = _safe_f(_res.get('overall_score') or risk.get('final_score', 0))
     fatal   = analysis.get('fatal_flag', False) or _res.get('is_fatal', False)
     amount  = float(case_data.get('cheque_amount', 0) or 0)
     is_comp = case_data.get('is_company_case', False)
@@ -11749,7 +11743,7 @@ def get_evidence_gap_priority(analysis: Dict, case_data: Dict) -> Dict:
     Ranked list of missing evidence — not just missing docs, but ranked by impact.
     """
     risk  = analysis.get('modules', {}).get('risk_assessment', {}) or {}
-    score = _safe_f(risk.get('overall_risk_score', 0))
+    score = _safe_f(risk.get('final_score', 0))
 
     gaps = []
 
@@ -12451,7 +12445,7 @@ def generate_plain_summary(analysis: Dict, case_data: Dict) -> Dict:
     # Use canonical _result score (same as deriveFilingStatus in frontend)
     # Falls back to risk module score if _result not yet built
     _res    = analysis.get('_result', {})
-    score   = float(_res.get('overall_score') or risk.get('overall_risk_score') or 0)
+    score   = float(_res.get('overall_score') or risk.get('final_score') or 0)
     compliance    = risk.get('compliance_level', 'UNKNOWN')
     fatal_flag    = analysis.get('fatal_flag', False)
     fatal_defects = doc.get('fatal_defects', [])
@@ -15617,7 +15611,7 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
                                          _risk.get('score_cap_explanation', {}).get('base_score') or
                                          0), 1)
             # Step 2: Get the final score (after any caps/overrides)
-            _orig_score    = round(float(_risk.get('overall_risk_score') or 0), 1)
+            _orig_score    = round(float(_risk.get('final_score') or 0), 1)
             # Step 3: If final=0 but base>0, recover — something went wrong in the cap logic
             if _orig_score == 0 and _base_weighted > 0:
                 _has_abs_fatal = any(
@@ -16529,7 +16523,7 @@ def _build_flat_report(a: dict) -> dict:
     settle  = (mods.get('settlement_analysis') or {})
     exec_s  = (a.get('executive_summary') or {})
 
-    score      = _n(R.get('overall_score') or a.get('risk_score') or risk.get('overall_risk_score'))
+    score      = _n(R.get('overall_score') or a.get('risk_score') or risk.get('final_score'))
     fatal      = bool(R.get('is_fatal') or a.get('fatal_flag') or a.get('is_fatal'))
     cat_scores = risk.get('category_scores') or {}
 
@@ -16959,7 +16953,7 @@ async def analyze_case(request: CaseAnalysisRequest, http_request: Request = Non
         analysis.setdefault('section_65b',        _am.get('section_65b_compliance', {}))
         analysis.setdefault('director_liability', _am.get('director_role_analysis', {}))
         analysis.setdefault('overall_score',
-            _am.get('risk_assessment', {}).get('overall_risk_score', 0) or
+            _am.get('risk_assessment', {}).get('final_score', 0) or
             analysis.get('risk_score', 0))
 
         # ── Canonical score: single source of truth ─────────────────────
@@ -16968,12 +16962,30 @@ async def analyze_case(request: CaseAnalysisRequest, http_request: Request = Non
             _result_obj.get('overall_score') or
             analysis.get('overall_score') or
             analysis.get('risk_score') or
-            (analysis.get('modules', {}).get('risk_assessment', {}).get('overall_risk_score') or 0)
+            (analysis.get('modules', {}).get('risk_assessment', {}).get('final_score') or 0)
         )
         _canon_fatal  = bool(
             _result_obj.get('is_fatal') or
             analysis.get('fatal_flag') or False
         )
+        
+        # ── Extract clean response fields ────────────────────────────────
+        _exec_summary = analysis.get('executive_summary', {})
+        _doc_context = _exec_summary.get('documentary_context', '')
+        _primary_issue = _exec_summary.get('primary_issue', '')
+        _next_actions = _exec_summary.get('next_actions', [])
+        _top_summary = _exec_summary.get('top_summary', '')
+        
+        # Determine clean status
+        if _canon_fatal:
+            _clean_status = "FATAL - DO NOT FILE"
+        elif _canon_score >= 75:
+            _clean_status = "READY TO FILE"
+        elif _canon_score >= 55:
+            _clean_status = "HIGH RISK CAUTION"
+        else:
+            _clean_status = "CRITICAL GAPS"
+        
         # Stamp analysis_timestamp so frontend library display works
         if not analysis.get('analysis_timestamp'):
             analysis['analysis_timestamp'] = datetime.utcnow().isoformat() + 'Z'
@@ -16984,6 +16996,16 @@ async def analyze_case(request: CaseAnalysisRequest, http_request: Request = Non
 
         return {
             "success": True,
+            
+            # ── CLEAN API RESPONSE (STEP 2) ──────────────────────────────
+            "final_score": round(_canon_score, 1),
+            "status": _clean_status,
+            "summary": _top_summary,
+            "documentary_strength": _doc_context,
+            "key_issue": _primary_issue,
+            "next_actions": _next_actions[:5] if _next_actions else [],
+            
+            # ── Legacy fields ─────────────────────────────────────────────
             "case_id":            analysis['case_id'],
             "analysis_timestamp": analysis['analysis_timestamp'],
 
