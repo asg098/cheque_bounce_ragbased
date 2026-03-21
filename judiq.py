@@ -5,6 +5,7 @@ import logging
 import sqlite3
 import time
 import os
+import re
 import threading
 from datetime import datetime, timedelta, date
 from dateutil.relativedelta import relativedelta
@@ -908,8 +909,6 @@ def _parse_phi2_questions(response: str, num_questions: int) -> list:
     Robust parser for Phi-2 output.
     Handles numbered lists, bullet points, and plain sentences.
     """
-    import re
-
     # Strip everything before "Output:" or "Questions:" if present
     for marker in ["Output:", "Questions:", "Answer:"]:
         if marker in response:
@@ -1377,7 +1376,7 @@ def validate_case_input(case_data: Dict) -> Tuple[bool, List[str]]:
         errors.append(f"❌ Invalid case_type: '{case_data.get('case_type')}' - Use 'complainant' or 'accused'")
 
     try:
-        amount = float(case_data['cheque_amount'])
+        amount = float(case_data.get('cheque_amount', 0) or 0)
         if amount <= 0:
             errors.append("❌ Cheque amount must be positive (greater than 0)")
         if amount > 100_000_000_000:
@@ -1956,6 +1955,9 @@ def adjust_weights_contextually(
         explanations.append("Company case: Section 141 liability weight +5%")
 
     total = sum(adjusted.values())
+    if total == 0:
+        logger.warning('adjust_weights_contextually: weights sum to 0, returning base_weights unchanged')
+        return base_weights.copy(), explanations
     adjusted = {k: v/total for k, v in adjusted.items()}
 
     return adjusted, explanations
@@ -2883,7 +2885,7 @@ llm_loaded = False
 kb_data = None
 kb_embeddings = None
 kb_loaded = False
-_kb_lock = __import__("threading").Lock()
+_kb_lock = threading.Lock()
 court_behavior_db = None
 embed_lock = threading.Lock()
 llm_lock = threading.Lock()
@@ -3146,7 +3148,6 @@ def _download_kb_from_gdrive(file_id: str, dest_path: Path) -> bool:
         # Google Drive returns an HTML warning page for large files
         # Detect and handle the confirmation token
         if b"virus scan warning" in raw.lower() or b"download_warning" in raw.lower():
-            import re
             token_match = re.search(rb'confirm=([0-9A-Za-z_\-]+)', raw)
             if token_match:
                 token = token_match.group(1).decode()
@@ -4003,8 +4004,8 @@ def analyze_ingredients(case_data: Dict, timeline_data: Dict) -> Dict:
 
     if case_data.get('transaction_date'):
         try:
-            trans_date = datetime.strptime(case_data['transaction_date'], '%Y-%m-%d')
-            cheque_date = datetime.strptime(case_data['cheque_date'], '%Y-%m-%d')
+            trans_date = datetime.strptime(case_data.get('transaction_date', ''), '%Y-%m-%d')
+            cheque_date = datetime.strptime(case_data.get('cheque_date', ''), '%Y-%m-%d')
             years_diff = (cheque_date - trans_date).days / 365
 
             if years_diff > 3:
@@ -5061,7 +5062,7 @@ def analyze_documentary_strength(case_data: Dict) -> Dict:
         capacity_flags = []
         capacity_score = 100
     
-        cheque_amount = float(case_data.get('cheque_amount', 0))
+        cheque_amount = float(case_data.get('cheque_amount', 0) or 0)
         has_itr = case_data.get('itr_available', False)
         has_bank_statement = case_data.get('bank_statement_available', False)
         income_source = case_data.get('income_source_documented', False)
@@ -7071,7 +7072,7 @@ def analyze_defence_risks(case_data: Dict, documentary_result: Dict) -> Dict:
             'defence_likely': True,
             'consequence': 'Enforceable debt reduced - May fall below ₹5000 threshold or cheque amount',
             'score_impact': -12,
-            'amount_impact': f"Disputed amount: ₹{case_data.get('cheque_amount', 0) - part_payment_amount}"
+            'amount_impact': f"Disputed amount: ₹{float(case_data.get('cheque_amount', 0) or 0) - part_payment_amount}"
         }
         risk_score -= 12
         consequence_adjustment -= 12
@@ -9294,13 +9295,20 @@ def generate_filing_readiness_checklist(
             'ready': False
         }
 
-    procedural_ok = True
-    checklist['clearance_items']['procedural'] = {
-        'status': '✅ Clear',
-        'detail': 'No procedural defects detected',
-        'ready': True
-    }
-    ready_count += 1
+    procedural_ok = len(fatal_blocks) == 0
+    if procedural_ok:
+        checklist['clearance_items']['procedural'] = {
+            'status': '✅ Clear',
+            'detail': 'No fatal procedural defects detected',
+            'ready': True
+        }
+        ready_count += 1
+    else:
+        checklist['clearance_items']['procedural'] = {
+            'status': '⚠️ Defects Present',
+            'detail': f'{len(fatal_blocks)} fatal blocker(s) detected — resolve before filing',
+            'ready': False
+        }
 
     checklist['readiness_score'] = int((ready_count / total_checks) * 100)
     checklist['fatal_blockers'] = fatal_blocks
@@ -11947,7 +11955,7 @@ def get_time_sensitivity(analysis: Dict, case_data: Dict) -> Dict:
     if not case_data.get('notice_date') and case_data.get('dishonour_date'):
         try:
             dd = _dt.strptime(case_data['dishonour_date'], '%Y-%m-%d').date()
-            notice_deadline = dd + __import__('dateutil.relativedelta', fromlist=['relativedelta']).relativedelta(months=1)
+            notice_deadline = dd + relativedelta(months=1)
             nd_left = (notice_deadline - today).days
             deadlines.append({
                 'type':      'Legal Notice Deadline (S.138)',
@@ -11975,7 +11983,7 @@ def get_time_sensitivity(analysis: Dict, case_data: Dict) -> Dict:
     if case_data.get('compounding_stage') in ('Appeal', 'Revision') and case_data.get('conviction_date'):
         try:
             cd = _dt.strptime(case_data['conviction_date'], '%Y-%m-%d').date()
-            deposit_deadline = cd + __import__('dateutil.relativedelta', fromlist=['relativedelta']).relativedelta(days=60)
+            deposit_deadline = cd + relativedelta(days=60)
             dd_left = (deposit_deadline - today).days
             deadlines.append({
                 'type':      'Section 148 Deposit Deadline (Appeal)',
@@ -11999,8 +12007,7 @@ def get_time_sensitivity(analysis: Dict, case_data: Dict) -> Dict:
         try:
             notice_dt    = _dt.strptime(notice_dt_str, '%Y-%m-%d').date()
             dishonour_dt = _dt.strptime(dishonour_dt_str, '%Y-%m-%d').date()
-            from datetime import date as _d2
-            notice_deadline = dishonour_dt + __import__('datetime').timedelta(days=30)
+            notice_deadline = dishonour_dt + timedelta(days=30)
             days_for_notice = (notice_dt - dishonour_dt).days
             if days_for_notice > 30:
                 alerts.append({
@@ -12024,7 +12031,7 @@ def get_time_sensitivity(analysis: Dict, case_data: Dict) -> Dict:
     if received_dt_str:
         try:
             received_dt = _dt.strptime(received_dt_str, '%Y-%m-%d').date()
-            coa_date    = received_dt + __import__('datetime').timedelta(days=15)
+            coa_date    = received_dt + timedelta(days=15)
             if complaint_dt_str:
                 complaint_dt = _dt.strptime(complaint_dt_str, '%Y-%m-%d').date()
                 days_after_coa = (complaint_dt - coa_date).days
@@ -12070,7 +12077,7 @@ def get_time_sensitivity(analysis: Dict, case_data: Dict) -> Dict:
                             urgency_level = 'URGENT'
                     deadlines.append({
                         'type':     'Complaint Filing Deadline (30 days from CoA)',
-                        'date':     (coa_date + __import__('datetime').timedelta(days=30)).strftime('%Y-%m-%d'),
+                        'date':     (coa_date + timedelta(days=30)).strftime('%Y-%m-%d'),
                         'days_left': remaining,
                         'status':   ('EXPIRED' if remaining < 0 else 'CRITICAL' if remaining <= 3
                                      else 'URGENT' if remaining <= 7 else 'HIGH' if remaining <= 14 else 'OK'),
@@ -13631,8 +13638,7 @@ def analyze_delay_condonation(case_data: Dict, timeline_result: Dict) -> Dict:
 
     # Calculate delay
     try:
-        import re as _re
-        delay_match = _re.search(r'(\d+)\s*days?\s*(late|delayed|after)', limitation_status.lower())
+        delay_match = re.search(r'(\d+)\s*days?\s*(late|delayed|after)', limitation_status.lower())
         if delay_match:
             result['delay_days'] = int(delay_match.group(1))
     except Exception as _e:
