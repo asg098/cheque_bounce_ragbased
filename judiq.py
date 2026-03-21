@@ -1191,56 +1191,10 @@ from enum import Enum
 # Render: sentence_transformers / transformers removed
 
 # --- API framework imports ---
-# ── Standalone stubs: FastAPI / Pydantic / Uvicorn ──────────────────────────
-# These replace the web-framework imports so the analysis engine can run
-# as a plain Python script without any server dependencies.
-import types as _types
-
-# ── Pydantic stub ─────────────────────────────────────────────────────────────
-def Field(default=None, **kw):
-    return default
-
-def field_validator(*args, **kw):
-    def decorator(fn): return fn
-    return decorator
-
-class BaseModel:
-    """Minimal BaseModel stub — supports attribute access and model_dump()."""
-    def __init__(self, **data):
-        for k, v in data.items():
-            setattr(self, k, v)
-    def model_dump(self):
-        return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
-    class model_config:
-        pass
-
-# ── FastAPI stub ──────────────────────────────────────────────────────────────
-class HTTPException(Exception):
-    def __init__(self, status_code=500, detail=""):
-        self.status_code = status_code
-        self.detail = detail
-        super().__init__(detail)
-
-class _Stub:
-    """Generic stub that silently absorbs any attribute access or call."""
-    def __init__(self, *a, **kw): pass
-    def __getattr__(self, name): return _Stub()
-    def __call__(self, *a, **kw): return _Stub()
-    def __iter__(self): return iter([])
-    def __bool__(self): return False
-    def __repr__(self): return "<Stub>"
-
-FastAPI = _Stub
-CORSMiddleware = _Stub
-UploadFile = _Stub
-File = _Stub
-Request = _Stub
-
-# ── Uvicorn stub ──────────────────────────────────────────────────────────────
-class _UvicornStub:
-    @staticmethod
-    def run(*a, **kw): pass
-uvicorn = _UvicornStub
+from fastapi import FastAPI, HTTPException, UploadFile, File, Request
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field, field_validator
+import uvicorn
 
 # --- Optional: rate limiting ---
 try:
@@ -4008,8 +3962,8 @@ def analyze_timeline(case_data: Dict) -> Dict:
 
     timeline_analysis['confidence'] = calculate_confidence(
         data_completeness=data_completeness,
-        kb_coverage=75.0,
-        retrieval_strength=0.80
+        kb_coverage=85.0 if kb_loaded else 20.0,
+        retrieval_strength=0.85 if kb_loaded else 0.35
     )
 
     return timeline_analysis
@@ -6558,11 +6512,20 @@ def calculate_overall_risk_score(
                 'impact': f'{category} is a major weakness in the case'
             })
 
-    avg_data_completeness = 85.0
+    # Compute real data completeness from the actual module outputs
+    _key_fields_provided = sum([
+        1 if timeline_data.get('cheque_date') or timeline_data.get('timeline_chart') else 0,
+        1 if ingredient_data.get('overall_compliance', 0) > 0 else 0,
+        1 if doc_data.get('overall_strength_score', 0) > 0 else 0,
+        1 if liability_data else 0,
+        1 if defect_data else 0,
+    ])
+    avg_data_completeness = min(100.0, _key_fields_provided / 5 * 100)
+    _kb_cov = 85.0 if kb_loaded else 20.0  # real KB vs minimal fallback
     risk_model['analysis_confidence'] = calculate_confidence(
         data_completeness=avg_data_completeness,
-        kb_coverage=70.0,
-        retrieval_strength=0.75
+        kb_coverage=_kb_cov,
+        retrieval_strength=0.80 if kb_loaded else 0.30
     )
 
     # CRITICAL: Guarantee overall_risk_score is always a valid number
@@ -11174,7 +11137,7 @@ def get_decision_confidence(analysis: Dict, case_data: Dict) -> Dict:
 # ── Feature 2 ────────────────────────────────────────────────────────────────
     except Exception as _get_de_err:
         logger.error(f"get_decision_confidence error: {_get_de_err}")
-        return {'module': 'Decision Confidence', 'confidence_level': 'MEDIUM', 'confidence_score': 50, 'label': 'Moderate confidence', 'factors': [], 'caveat': 'Could not fully assess confidence.'}
+        return {'module': 'Decision Confidence', 'confidence_level': 'UNKNOWN', 'confidence_score': None, 'label': 'Confidence unavailable', 'factors': [], 'caveat': 'An internal error prevented confidence assessment. Check logs.', 'error': str(_get_de_err)}
 
 def get_contradiction_explainer(analysis: Dict, case_data: Dict) -> Dict:
     """
@@ -12752,7 +12715,7 @@ async def lifespan(app: FastAPI):
     print(f"💾 Analytics DB: {analytics_db_path}")
     print("⚡ Embedding Cache: Disabled (Render)")
     print("="*100 + "\n")
-    print("🎯 INTELLIGENCE CAPABILITIES (90% ELITE-GRADE):")
+    print("🎯 INTELLIGENCE CAPABILITIES:")
     print("  ✅ Layer 1: Timeline Intelligence (Deterministic + Confidence)")
     print("  ✅ Layer 2: Ingredient Compliance (Calibrated Weights)")
     print("  ✅ Layer 3: Documentary Strength (Severity Tiers)")
@@ -12788,7 +12751,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="JUDIQ v5.0 - Legal Intelligence Platform",
     version="5.0.0",
-    description="90% Elite-Grade Section 138 NI Act Analysis - Ratio-Based Analytics",
+    description="Section 138 NI Act Analysis — Rule-based deterministic engine covering timeline, ingredients, documentary, liability, defence, and settlement modules.",
     lifespan=lifespan
 )
 
@@ -16223,7 +16186,7 @@ async def root():
     return {
         "platform": "JUDIQ v5.0 - Legal Intelligence Platform",
         "version": "5.0.0",
-        "maturity": "90% Elite-Grade",
+        "engine": "rule-based-deterministic",
         "status": "operational",
         "message": "Welcome to JUDIQ AI - Section 138 NI Act Intelligence Platform",
         "capabilities": {
@@ -16258,16 +16221,16 @@ async def root():
 
 @app.get("/test")
 async def test_endpoint():
-
     return {
         "status": "✅ API is working!",
         "platform": "JUDIQ v5.0",
-        "maturity": "90% Elite-Grade",
+        "engine": "rule-based-deterministic",
         "timestamp": time.time(),
-        "message": "All systems operational",
+        "kb_loaded": kb_loaded,
+        "kb_rows": len(kb_data) if kb_loaded and kb_data is not None else 0,
         "next_steps": [
-            "Visit /docs for interactive API documentation",
-            "Try GET /health for system status",
+            "POST /analyze-case with case JSON to run a full analysis",
+            "GET /health for system status",
             "Try GET /validation/accuracy to see accuracy metrics"
         ]
     }
@@ -16373,7 +16336,7 @@ async def health():
         "llm_enhancement": False,  # LLM disabled on Render
         "embed_model": False,  # embedding disabled on Render
         "database": str(analytics_db_path),
-        "maturity_level": "90% Elite-Grade"
+        "engine": "rule-based-deterministic"
     }
 
 @app.get("/validation/accuracy")
@@ -16498,7 +16461,10 @@ async def generate_report(case_id: str, format: str = "executive"):
         conn.close()
 
         if not result:
-            raise HTTPException(status_code=404, detail="Case not found")
+            raise HTTPException(
+                status_code=404,
+                detail=f"No analysis found for case_id='{case_id}'. Run POST /analyze-case first to generate an analysis."
+            )
 
         analysis_data = _safe_json_parse(result[0])
 
@@ -17457,6 +17423,244 @@ def cleanup_ngrok():
     pass
 
 
+def classify_risk_legal_tone(score: float, fatal_defects: List) -> Dict:
+
+    if fatal_defects and len(fatal_defects) > 0:
+        return {
+            'category': 'HIGH DISMISSAL RISK',
+            'tone': 'Statutory compliance deficient - dismissal probable',
+            'label': 'Critical Defects Identified'
+        }
+    elif score >= 80:
+        return {
+            'category': 'STATUTORILY COMPLIANT',
+            'tone': 'Statutory requirements appear satisfied (subject to proof)',
+            'label': 'Compliance Adequate'
+        }
+    elif score >= 60:
+        return {
+            'category': 'PROCEDURAL RISK IDENTIFIED',
+            'tone': 'Compliance adequate with evidentiary gaps',
+            'label': 'Moderate Risks Present'
+        }
+    elif score >= 40:
+        return {
+            'category': 'SIGNIFICANT DEFICIENCIES',
+            'tone': 'Material compliance gaps - remediation advisable',
+            'label': 'Weak Compliance'
+        }
+    else:
+        return {
+            'category': 'HIGH DISMISSAL RISK',
+            'tone': 'Substantial statutory violations - remediation required',
+            'label': 'Critical Deficiencies'
+        }
+
+class JudiqException(Exception):
+    """Base exception for all JUDIQ errors"""
+    def __init__(self, message: str, severity: str = "ERROR", details: dict = None):
+        self.message = message
+        self.severity = severity
+        self.details = details or {}
+        super().__init__(self.message)
+
+class BusinessLogicException(JudiqException):
+    """Exception for business logic violations"""
+    def __init__(self, message: str, details: dict = None):
+        super().__init__(message, "WARNING", details)
+
+class LegalViolationException(JudiqException):
+    """Exception for legal compliance violations"""
+    def __init__(self, message: str, fatal: bool = False, details: dict = None):
+        severity = "CRITICAL" if fatal else "ERROR"
+        super().__init__(message, severity, details)
+
+class DatabaseException(JudiqException):
+    """Exception for database operations"""
+    def __init__(self, message: str, query: str = None, details: dict = None):
+        details = details or {}
+        if query:
+            details['query'] = query
+        super().__init__(message, "ERROR", details)
+
+class ValidationException(JudiqException):
+    """Exception for input validation failures"""
+    def __init__(self, message: str, field: str = None, details: dict = None):
+        details = details or {}
+        if field:
+            details['field'] = field
+        super().__init__(message, "WARNING", details)
+
+class SystemException(JudiqException):
+    """Exception for system-level errors"""
+    def __init__(self, message: str, component: str = None, details: dict = None):
+        details = details or {}
+        if component:
+            details['component'] = component
+        super().__init__(message, "CRITICAL", details)
+
+class FatalException(Exception):
+    pass
+
+
+def check_absolute_fatal_conditions(case_data: Dict, timeline_result: Dict, doc_compliance: Dict, defence_risks: Dict) -> Dict:
+
+    fatal_conditions = {
+        'has_fatal': False,
+        'fatal_reasons': [],
+        'immediate_fail_status': None
+    }
+
+    if timeline_result.get('limitation_risk') in ['EXPIRED', 'CRITICAL']:
+        fatal_conditions['has_fatal'] = True
+        fatal_conditions['fatal_reasons'].append({
+            'condition': 'LIMITATION EXPIRED',
+            'impact': 'Case is time-barred - Filing will be rejected',
+            'action': 'DO NOT FILE'
+        })
+
+    if len(doc_compliance.get('fatal_defects', [])) > 0:
+        fatal_conditions['has_fatal'] = True
+        for defect in doc_compliance['fatal_defects']:
+            fatal_conditions['fatal_reasons'].append({
+                'condition': defect.get('defect', 'Fatal document defect'),
+                'impact': defect.get('impact', 'Filing blocked'),
+                'action': 'DO NOT FILE'
+            })
+
+    if len(defence_risks.get('fatal_defences', [])) > 0:
+        fatal_conditions['has_fatal'] = True
+        for fatal_def in defence_risks['fatal_defences']:
+            fatal_conditions['fatal_reasons'].append({
+                'condition': fatal_def.get('ground', 'Fatal defence exposure'),
+                'impact': fatal_def.get('viability_impact', 'Case may collapse'),
+                'action': 'ADDRESS URGENTLY'
+            })
+
+    if fatal_conditions['has_fatal']:
+        fatal_conditions['immediate_fail_status'] = {
+            'overall_status': 'FATAL - DO NOT FILE',
+            'risk_score': 15,
+            'compliance_level': 'FATAL FAILURE',
+            'filing_blocked': True,
+            'fatal_count': len(fatal_conditions['fatal_reasons']),
+            'decisive_verdict': f"ABSOLUTE FAILURE - {len(fatal_conditions['fatal_reasons'])} fatal conditions detected"
+        }
+
+    return fatal_conditions
+
+
+def apply_severity_tier_escalation(issues: Dict) -> Dict:
+
+    fatal_count = issues.get('fatal', 0)
+    critical_count = issues.get('critical', 0)
+    warning_count = issues.get('warning', 0)
+
+    if fatal_count >= 1:
+        return {
+            'tier': 'FATAL',
+            'status': 'CASE FAILURE',
+            'score_cap': 15,
+            'recommendation': 'DO NOT FILE - Fatal defects present'
+        }
+    elif critical_count >= 2:
+        return {
+            'tier': 'HIGH RISK',
+            'status': 'CRITICAL GAPS',
+            'score_cap': 45,
+            'recommendation': 'FILING NOT ADVISABLE - Multiple critical issues'
+        }
+    elif critical_count >= 1:
+        return {
+            'tier': 'MODERATE RISK',
+            'status': 'GAPS PRESENT',
+            'score_cap': 65,
+            'recommendation': 'Address critical gap before filing'
+        }
+    elif warning_count >= 4:
+        return {
+            'tier': 'REVIEW REQUIRED',
+            'status': 'MINOR GAPS',
+            'score_cap': 75,
+            'recommendation': 'Strengthen weak areas'
+        }
+    else:
+        return {
+            'tier': 'ACCEPTABLE',
+            'status': 'COMPLIANT',
+            'score_cap': 100,
+            'recommendation': 'Ready to file'
+        }
+
+
+
+USAGE_LOG = []
+
+def get_usage_analytics() -> Dict:
+    if not USAGE_LOG:
+        return {'total_analyses': 0, 'events': []}
+
+    fatal_count = sum(1 for e in USAGE_LOG if e.get('event') == 'FATAL_DETECTED')
+    success_count = sum(1 for e in USAGE_LOG if e.get('event') == 'ANALYSIS_COMPLETE')
+
+    return {
+        'total_analyses': len(USAGE_LOG),
+        'fatal_cases': fatal_count,
+        'success_cases': success_count,
+        'fatal_rate': (fatal_count / len(USAGE_LOG) * 100) if USAGE_LOG else 0,
+        'recent_events': USAGE_LOG[-20:]
+    }
+
+
+
+def format_concise_output(analysis: Dict) -> str:
+    lines = []
+    lines.append("═" * 50)
+
+    if analysis.get('fatal_flag'):
+        lines.append("🔴 FILING BLOCKED")
+        lines.append("═" * 50)
+        lines.append(f"Status: {analysis.get('overall_status', 'FATAL')}")
+        lines.append(f"Score: {analysis.get('risk_score', 0)}/100")
+        lines.append(f"Verdict: {analysis.get('decisive_verdict', 'DO NOT FILE')}")
+        lines.append("")
+        lines.append("Fatal Issues:")
+
+        if 'LIMITATION' in analysis.get('overall_status', ''):
+            lines.append("• Case time-barred")
+        if 'DOCUMENT' in analysis.get('overall_status', ''):
+            lines.append("• Critical documents missing")
+        if 'DEFENCE' in analysis.get('overall_status', ''):
+            lines.append("• Fatal defence exposure")
+    else:
+        score = analysis.get('modules', {}).get('risk_assessment', {}).get('overall_risk_score', 0)
+        lines.append(f"Risk Score: {score}/100")
+        lines.append("═" * 50)
+
+        if score >= 75:
+            lines.append("Status: ✅ READY TO FILE")
+        elif score >= 60:
+            lines.append("Status: ⚠️ GAPS PRESENT")
+        else:
+            lines.append("Status: 🔴 HIGH RISK")
+
+        issues = []
+        doc_comp = analysis.get('modules', {}).get('document_compliance', {})
+        if doc_comp.get('compliance_score', 100) < 80:
+            issues.append("• Document gaps")
+
+        defence = analysis.get('modules', {}).get('defence_risk_analysis', {})
+        if len(defence.get('high_risk_defences', [])) > 0:
+            issues.append(f"• {len(defence['high_risk_defences'])} defence risks")
+
+        if issues:
+            lines.append("")
+            lines.append("Key Issues:")
+            lines.extend(issues)
+
+    lines.append("═" * 50)
+    return "\n".join(lines)
+
 def main():
     """Entry point for local development only. Render uses uvicorn directly."""
     print("\n" + "="*100)
@@ -17465,514 +17669,5 @@ def main():
     port = CONFIG["PORT"]
     uvicorn.run(app, host=CONFIG["HOST"], port=port, log_level="info")
 
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# STANDALONE RUNNER  ──  python judiq.py
-# ═══════════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    import argparse, textwrap, pprint
-
-    # ── CLI args ──────────────────────────────────────────────────────────────
-    _ap = argparse.ArgumentParser(description="JUDIQ – Section 138 NI Act Analysis")
-    _ap.add_argument("--input",  "-i", help="Path to JSON file with case data")
-    _ap.add_argument("--output", "-o", help="Save full JSON result to this path")
-    _ap.add_argument("--json-only", "-j", action="store_true",
-                     help="Print raw JSON result only")
-    _args = _ap.parse_args()
-
-    # ── Sample case (used when no --input is given) ───────────────────────────
-    _SAMPLE_CASE = {
-        "case_type":                 "complainant",
-        "cheque_amount":             500000,
-        "cheque_number":             "123456",
-        "cheque_date":               "2025-10-15",
-        "bank_name":                 "HDFC Bank",
-        "transaction_date":          "2025-10-01",
-        "transaction_amount":        500000,
-        "debt_nature":               "loan",
-        "dishonour_date":            "2025-10-20",
-        "dishonour_reason":          "Insufficient Funds",
-        "presentation_date":         "2025-10-20",
-        "return_memo_available":     True,
-        "notice_date":               "2025-11-05",
-        "notice_received_date":      "2025-11-08",
-        "notice_sent_to_address":    "Registered residential address",
-        "notice_signed":             True,
-        "postal_proof_available":    True,
-        "complaint_filed_date":      "2025-12-10",
-        "court_location":            "Mumbai Metropolitan Magistrate Court",
-        "original_cheque_available": True,
-        "written_agreement_exists":  True,
-        "ledger_available":          True,
-        "email_sms_evidence":        False,
-        "witness_available":         False,
-        "is_company_case":           False,
-        "directors_impleaded":       False,
-        "specific_averment_present": True,
-        "is_multiple_cheques":       False,
-        "civil_suit_pending":        False,
-        "insolvency_proceedings":    False,
-        "defence_type":              "no_defence",
-        "complainant_annual_income": 1200000,
-        "part_payment_made":         False,
-        "part_payment_amount":       None,
-        "itr_available":             True,
-        "bank_statement_available":  True,
-        "income_source_documented":  True,
-        "interest_rate":             12,
-        "case_summary": (
-            "Accused borrowed ₹5,00,000 from complainant in October 2025. "
-            "Issued a cheque dated 15-Oct-2025 dishonoured on 20-Oct-2025 "
-            "for insufficient funds. Statutory notice sent by speed post on "
-            "05-Nov-2025, received 08-Nov-2025. Accused failed to pay. "
-            "Complaint filed 10-Dec-2025."
-        ),
-    }
-
-    # ── Load input ────────────────────────────────────────────────────────────
-    if _args.input:
-        import json as _json_mod
-        _case = _json_mod.loads(open(_args.input).read())
-        print(f"📂 Loaded case data from: {_args.input}")
-    else:
-        _case = _SAMPLE_CASE.copy()
-        print("📋 Using built-in sample case (Mumbai complainant, ₹5,00,000 loan cheque)\n")
-
-    # ── Initialise DB + KB ────────────────────────────────────────────────────
-    print("⚙️  Initialising database …", flush=True)
-    init_analytics_db()
-    print("📚 Loading knowledge base …", flush=True)
-    load_kb()
-
-    # ── Sanity + Validation ───────────────────────────────────────────────────
-    _SOFT = {
-        'FUTURE_DATE_CHEQUE_DATE', 'FUTURE_DATE_DISHONOUR_DATE',
-        'FUTURE_DATE_NOTICE_DATE', 'FUTURE_DATE_COMPLAINT_FILED_DATE', 'LARGE_AMOUNT',
-    }
-    _sanity = run_input_sanity_check(_case)
-    _hard   = [e for e in _sanity.get("errors", []) if e.get("check") not in _SOFT]
-    if _hard:
-        print("\n❌ INPUT ERRORS — cannot proceed:")
-        for _e in _hard:
-            print(f"   • {_e.get('message', _e)}")
-        raise SystemExit(1)
-    _case["_sanity_check"]    = _sanity
-    _case["_sanity_warnings"] = _sanity.get("warnings", [])
-
-    _valid, _verrs, _san = validate_case_input_strict(_case)
-    if not _valid:
-        print("\n❌ VALIDATION ERRORS:")
-        for _e in _verrs:
-            print(f"   • {_e}")
-        raise SystemExit(1)
-    _case = _san
-    _case.pop("_warnings", None)
-
-    # ── Unified timeline ──────────────────────────────────────────────────────
-    _case["_unified_timeline"] = compute_unified_timeline(_case)
-
-    # ── Full analysis ─────────────────────────────────────────────────────────
-    print("🔍 Running comprehensive analysis …\n", flush=True)
-    _analysis = perform_comprehensive_analysis(_case)
-
-    if _analysis.get("error"):
-        print(f"\n❌ Analysis failed: {_analysis.get('error_message') or _analysis.get('error')}")
-        raise SystemExit(1)
-
-    # ── Save JSON ─────────────────────────────────────────────────────────────
-    import json as _json_mod, pathlib as _pl
-    _out_path = _pl.Path(_args.output) if _args.output else _pl.Path("judiq_result.json")
-    _out_path.write_text(_json_mod.dumps(_analysis, indent=2, default=str))
-    print(f"💾 Full JSON saved → {_out_path}\n")
-
-    if _args.json_only:
-        print(_json_mod.dumps(_analysis, indent=2, default=str))
-        raise SystemExit(0)
-
-    # ── Generate report objects ───────────────────────────────────────────────
-    try:
-        _exec_rep = generate_executive_report(_analysis)
-    except Exception as _ex:
-        _exec_rep = {}
-
-    try:
-        _det_rep = generate_detailed_report(_analysis)
-    except Exception as _ex:
-        _det_rep = {}
-
-    # ── Helper functions ──────────────────────────────────────────────────────
-    _SEP  = "═" * 80
-    _SEP2 = "─" * 80
-
-    def _bar(score, width=28):
-        try:
-            s = max(0.0, min(100.0, float(score or 0)))
-            f = int(s / 100 * width)
-            return f"[{'█'*f}{'░'*(width-f)}] {s:.0f}/100"
-        except Exception:
-            return str(score)
-
-    def _icon(sev):
-        s = str(sev).upper()
-        if "CRITICAL" in s or "FATAL" in s: return "🔴"
-        if "HIGH" in s:                       return "🟠"
-        if "MEDIUM" in s or "MODERATE" in s:  return "🟡"
-        if "LOW" in s:                         return "🟢"
-        return "⚪"
-
-    def _wrap(text, indent="  ", width=76):
-        if not text: return ""
-        import textwrap as _tw
-        return "\n".join(
-            _tw.fill(line, width=width, initial_indent=indent,
-                     subsequent_indent=indent)
-            for line in str(text).splitlines()
-        )
-
-    # ── Extract key sections ──────────────────────────────────────────────────
-    _mods     = _analysis.get("modules", {})
-    _risk     = _mods.get("risk_assessment", {})
-    _tl       = _mods.get("timeline_intelligence", {})
-    _ing      = _mods.get("ingredient_compliance", {})
-    _doc      = _mods.get("documentary_strength", {})
-    _proc     = _mods.get("procedural_defects", _mods.get("document_compliance", {}))
-    _def_m    = _mods.get("defence_matrix", _mods.get("defence_risk_analysis", {}))
-    _sett     = _mods.get("settlement_analysis", _mods.get("settlement_intelligence", {}))
-    _cross    = _mods.get("cross_examination_risk", {})
-    _jud      = _mods.get("judicial_behavior", {})
-    _pres     = _mods.get("presumption_analysis", {})
-    _esumm    = _analysis.get("executive_summary", {})
-    _plain    = _analysis.get("plain_summary", {})
-    _score    = _risk.get("overall_risk_score", 0)
-    _fatal    = _analysis.get("fatal_flag", False)
-    _cats     = _risk.get("category_scores", {})
-    _meta     = _analysis.get("case_metadata", {})
-    _pt       = _analysis.get("processing_time_seconds", "?")
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # PRINT REPORT
-    # ══════════════════════════════════════════════════════════════════════════
-    # Quieten the logger for clean console output
-    import logging as _logging
-    logging.getLogger().setLevel(_logging.ERROR)
-
-    from datetime import datetime as _dt2
-    print(f"\n{_SEP}")
-    print("  JUDIQ AI — SECTION 138 NI ACT  ·  FULL ANALYSIS REPORT")
-    print(f"  Generated : {_dt2.now().strftime('%d %b %Y  %H:%M:%S')}")
-    print(f"  Engine    : {_analysis.get('engine_version','v10.0')}  "
-          f"| Processing: {_pt}s")
-    print(_SEP)
-
-    # CASE SNAPSHOT
-    print("\n▌ CASE SNAPSHOT")
-    print(_SEP2)
-    print(f"  Type    : {_meta.get('case_type','').upper()}")
-    _amt_raw = _meta.get('cheque_amount_formatted') or _meta.get('cheque_amount') or _case.get('cheque_amount','')
-    _amt_str = _amt_raw if isinstance(_amt_raw,str) else (f"₹{int(_amt_raw):,}" if isinstance(_amt_raw,(int,float)) else str(_amt_raw))
-    print(f"  Amount  : {_amt_str}")
-    _bank_name = _meta.get('bank_name') or _case.get('bank_name','')
-    print(f"  Bank    : {_bank_name}")
-    print(f"  Case ID : {_analysis.get('case_id', 'N/A')}")
-
-    # VERDICT
-    print(f"\n{_SEP}")
-    print("  VERDICT")
-    print(_SEP)
-    _verdict = (_esumm.get("filing_verdict") or _plain.get("one_line_verdict") or
-        ("⛔ DO NOT FILE — Fatal defect present" if _fatal else
-         "✅ PROCEED TO FILE" if _score >= 70 else
-         "⚠️  CONDITIONAL — Strengthen evidence before filing" if _score >= 50 else
-         "🔴 WEAK CASE — Major remediation required"))
-    print(f"\n  {_verdict}\n")
-    print(f"  Overall Risk Score : {_bar(_score)}")
-    _cl_raw = _analysis.get("compliance_level") or _risk.get("compliance_level","")
-    _cl = str(_cl_raw).split('.')[-1] if _cl_raw else ""
-    if _cl: print(f"  Compliance Level   : {_cl}")
-    _lr = _tl.get("limitation_risk","Unknown")
-    print(f"  Limitation Risk    : {_icon(_lr)} {_lr}")
-    if _fatal:
-        _fd0 = (_risk.get("fatal_defects") or [{}])[0]
-        print(f"\n  ⛔ FATAL: {_fd0.get('defect','See details')}")
-    _one_raw = _plain.get("one_line_verdict") or _esumm.get("top_summary") or _esumm.get("case_overview","")
-    _one = str(_one_raw).replace("ComplianceLevel.","") if _one_raw else ""
-    # Remove already-printed verdict duplicate
-    _one = _one if _one and _verdict not in _one else ""
-    _one = _one
-    if _one:
-        print(f"\n{_wrap(_one)}")
-
-    # CATEGORY SCORES
-    print(f"\n{_SEP2}")
-    print("  CATEGORY SCORES")
-    print(_SEP2)
-    for _cat, _d in _cats.items():
-        _s = _d.get("score",0) if isinstance(_d,dict) else _d
-        _w2 = _d.get("weight",0) if isinstance(_d,dict) else 0
-        print(f"  {_cat:<30} {_bar(_s, 20)}  (wt {_w2*100:.0f}%)")
-
-    # TIMELINE
-    print(f"\n{_SEP2}")
-    print("  TIMELINE ANALYSIS")
-    print(_SEP2)
-    _tc = _tl.get("compliance_status",{})
-    for _lbl, _key in [("Cheque Validity","cheque_validity"),
-                        ("Notice Timing","notice_timing"),
-                        ("Complaint Limitation","limitation")]:
-        print(f"  {_lbl:<28} {_tc.get(_key,'—')}")
-    _evs = sorted([e for e in _tl.get("timeline_chart",[]) if e.get("date")],
-                  key=lambda x: x.get("date","9999"))
-    if _evs:
-        print("\n  Chronology:")
-        for _ev in _evs:
-            print(f"    {_ev.get('date','?')!s:<12} {_ev.get('event',_ev.get('description',''))}")
-
-    # INGREDIENT COMPLIANCE
-    print(f"\n{_SEP2}")
-    print("  INGREDIENT COMPLIANCE  (Section 138)")
-    print(_SEP2)
-    _oc = _ing.get("overall_compliance",0)
-    print(f"  Overall : {_bar(_oc)}")
-    for _it in _ing.get("ingredient_details",[]):
-        _si = _it.get("score",0)
-        _ic = "✅" if _si>=70 else ("⚠️ " if _si>=40 else "🔴")
-        print(f"  {_ic} {_it.get('name', _it.get('ingredient','')):<45} {_si:.0f}/100")
-    _fi = _ing.get("fatal_defects",[])
-    if _fi:
-        print("\n  ⛔ Fatal Ingredient Defects:")
-        for _f in _fi: print(f"    • {_f.get('defect',_f)}")
-
-    # DOCUMENTARY STRENGTH
-    print(f"\n{_SEP2}")
-    print("  DOCUMENTARY STRENGTH")
-    print(_SEP2)
-    _ds = _doc.get("overall_strength_score", _doc.get("overall_score",0))
-    _dl = _doc.get("strength_label", _doc.get("overall_grade", _doc.get("strength_level","")))
-    print(f"  Strength : {_bar(_ds)}  {_dl}")
-    _md = _doc.get("critical_gaps", _doc.get("missing_critical_docs", _doc.get("missing_documents",[])))
-    if _md:
-        print("\n  Critical Gaps / Missing Documents:")
-        for _m in _md[:8]:
-            _m_text = _m.get('gap', _m.get('issue', str(_m))) if isinstance(_m,dict) else str(_m)
-            print(f"    • {_m_text}")
-    _doc_recs = _doc.get("recommendations",[])
-    if _doc_recs:
-        print("\n  Recommendations:")
-        for _dr in _doc_recs[:4]: print(f"    → {_dr}")
-
-    # PROCEDURAL DEFECTS
-    print(f"\n{_SEP2}")
-    print("  PROCEDURAL DEFECTS")
-    print(_SEP2)
-    _pfat = _proc.get("fatal_defects",[])
-    _pcur = _proc.get("curable_defects",[])
-    _pwrn = _proc.get("warnings",[])
-    if not _pfat and not _pcur and not _pwrn:
-        print("  ✅ No procedural defects detected.")
-    else:
-        if _pfat:
-            print(f"  🔴 FATAL ({len(_pfat)}):")
-            for _pf in _pfat:
-                print(f"    • {_pf.get('defect','')}")
-                if _pf.get("impact"): print(_wrap(_pf["impact"], "      "))
-                if _pf.get("remedy"): print(_wrap("→ Remedy: "+_pf["remedy"], "      "))
-        if _pcur:
-            print(f"\n  🟡 Curable ({len(_pcur)}):")
-            for _pc in _pcur[:5]:
-                print(f"    • {_pc.get('defect','')}  [{_pc.get('severity','')}]")
-                if _pc.get("cure"): print(_wrap(_pc["cure"],"      "))
-        if _pwrn:
-            print(f"\n  ⚠️  Warnings:")
-            for _pw in _pwrn[:5]:
-                _wd = _pw.get('warning', _pw.get('defect', str(_pw))) if isinstance(_pw,dict) else _pw
-                print(f"    • {_wd}")
-
-    # DEFENCE MATRIX
-    print(f"\n{_SEP2}")
-    print("  DEFENCE MATRIX")
-    print(_SEP2)
-    _def_overall = _def_m.get('overall_defence_strength', _def_m.get('overall_risk',''))
-    print(f"  Overall Strength : {_def_overall}")
-    _def_poss = _def_m.get("possible_defences", [])
-    if _def_poss:
-        print(f"\n  Possible Defences ({len(_def_poss)}):")
-        for _dp in _def_poss[:5]:
-            if isinstance(_dp, dict):
-                _dp_str = _dp.get('strength','')
-                _dp_score = _dp.get('strength_score','')
-                print(f"    {_icon(_dp_str)} {_dp.get('defence','')}")
-                _dp_basis = _dp.get('basis','')
-                if _dp_basis:
-                    print(f"       {_dp_basis[:100]}")
-    _fd2 = _def_m.get("fatal_defences",[])
-    if _fd2:
-        print("\n  ⛔ Fatal Defence Risks:")
-        for _fd3 in _fd2[:4]:
-            print(f"    • {_fd3.get('defence',_fd3) if isinstance(_fd3,dict) else _fd3}")
-    _def_counter = _def_m.get("complainant_counter_strategy", [])
-    if _def_counter:
-        print("\n  Counter-Strategy for Complainant:")
-        for _cs in _def_counter[:4]:
-            print(f"    → {_cs}")
-
-    # PRESUMPTION ANALYSIS
-    print(f"\n{_SEP2}")
-    print("  PRESUMPTION ANALYSIS  (Section 139)")
-    print(_SEP2)
-    _pa = _pres.get("presumption_activated", _pres.get("presumption_available", _pres.get("presumption_triggered",False)))
-    _pb = _pres.get("burden_position","")
-    _prb = _pres.get("rebuttal_strength","NONE")
-    _psc = _pres.get("presumption_score", _pres.get("overall_score",""))
-    print(f"  Triggered : {'✅ YES' if _pa else '❌ NO'}")
-    if _pb: print(f"  Burden    : {_pb}")
-    if _prb and _prb != "NONE": print(f"  Rebuttal  : {_icon(_prb)} {_prb}")
-    if _psc != "": print(f"  Score     : {_bar(_psc)}")
-    _rg = _pres.get("rebuttal_grounds", _pres.get("accused_rebuttal_options",[]))
-    if _rg:
-        print("\n  Rebuttal Grounds:")
-        for _rgi in _rg[:5]:
-            print(f"    • {_rgi.get('ground',_rgi) if isinstance(_rgi,dict) else _rgi}")
-
-    # CROSS-EXAMINATION RISK
-    print(f"\n{_SEP2}")
-    print("  CROSS-EXAMINATION RISK")
-    print(_SEP2)
-    _cx = _cross.get("overall_cross_exam_risk", _cross.get("overall_risk",""))
-    _cxs = _cross.get("risk_score","")
-    print(f"  Risk Level  : {_icon(_cx)} {_cx}")
-    if _cxs != "": print(f"  Vuln Score  : {_cxs}")
-    for _z in _cross.get("vulnerability_zones",[])[:6]:
-        print(f"    {_icon(_z.get('severity',''))} {_z.get('area',_z.get('zone',''))}")
-        if _z.get("likely_question"): print(f"       Q: {_z['likely_question']}")
-    _pr = _cross.get("preparation_required",[])
-    if _pr:
-        print("\n  Preparation Required:")
-        for _p in _pr[:4]: print(f"    → {_p}")
-
-    # SETTLEMENT ANALYSIS
-    print(f"\n{_SEP2}")
-    print("  SETTLEMENT ANALYSIS")
-    print(_SEP2)
-    _sr = _sett.get("settlement_range",{})
-    _sp = _sett.get("settlement_probability","")
-    _sl = _sett.get("settlement_leverage","")
-    _srec = _sett.get("settlement_recommendation","")
-    if _sr and isinstance(_sr, dict):
-        _lo = _sr.get("minimum",_sr.get("min",""))
-        _hi = _sr.get("maximum",_sr.get("max",""))
-        _fa = _sr.get("recommended",_sr.get("fair",""))
-        if _lo and _hi:
-            try:
-                def _fmt_amt(v):
-                    return f"₹{int(float(v)):,}" if v else ""
-                print(f"  Range         : {_fmt_amt(_lo)} – {_fmt_amt(_hi)}  (Recommended {_fmt_amt(_fa)})")
-            except Exception:
-                print(f"  Range         : {_lo} – {_hi}")
-    if _sp: print(f"  Probability   : {_sp}")
-    if _sl: print(f"  Leverage      : {_sl}")
-    if _srec: print(_wrap(_srec))
-
-    # JUDICIAL BEHAVIOUR
-    print(f"\n{_SEP2}")
-    print("  JUDICIAL BEHAVIOUR")
-    print(_SEP2)
-    _jc = _jud.get("court_analyzed") or _jud.get("court_location") or _case.get("court_location","Not specified")
-    print(f"  Court   : {_jc}")
-    _ji = _jud.get("behavioral_indices",{})
-    _jcr = _ji.get("historical_conviction_rate", _ji.get("conviction_rate",""))
-    _jsi = _ji.get("limitation_strictness", _ji.get("strictness_index",""))
-    if _jcr != "": print(f"  Conv Rate  : {_jcr:.1f}%" if isinstance(_jcr,(int,float)) else f"  Conv Rate  : {_jcr}")
-    if _jsi != "": print(f"  Strictness : {_jsi}")
-    for _jr in _jud.get("strategic_recommendations",[])[:3]:
-        _jrt = _jr.get("recommendation","") if isinstance(_jr,dict) else _jr
-        print(f"    → {_jrt}")
-
-    # FATAL DEFECTS SUMMARY
-    _afd = _risk.get("fatal_defects",[])
-    if _afd:
-        print(f"\n{_SEP}")
-        print(f"  ⛔ FATAL DEFECTS  ({len(_afd)} total — resolve BEFORE filing)")
-        print(_SEP)
-        for _fd4 in _afd:
-            print(f"\n  🔴 {_fd4.get('defect','')}  [{_fd4.get('severity','')}]")
-            if _fd4.get("impact"): print(_wrap(_fd4["impact"]))
-            if _fd4.get("remedy"): print(_wrap("→ Remedy: "+_fd4["remedy"]))
-
-    # STRENGTHS & WEAKNESSES
-    _str2 = _plain.get("strengths") or _esumm.get("strengths",[])
-    _wk2  = _plain.get("weaknesses") or _esumm.get("weaknesses",[])
-    if _str2 or _wk2:
-        print(f"\n{_SEP2}")
-        print("  STRENGTHS & WEAKNESSES")
-        print(_SEP2)
-    if _str2:
-        print("\n  ✅ STRENGTHS:")
-        for _s2 in _str2[:6]: print(f"    • {_s2}")
-    if _wk2:
-        print("\n  ⚠️  WEAKNESSES:")
-        for _w3 in _wk2[:6]: print(f"    • {_w3}")
-
-    # STRATEGIC RECOMMENDATIONS
-    _recs2 = _esumm.get("strategic_recommendations",[]) or _plain.get("next_steps",[])
-    if _recs2:
-        print(f"\n{_SEP2}")
-        print("  STRATEGIC RECOMMENDATIONS")
-        print(_SEP2)
-        for _ri, _rec2 in enumerate(_recs2[:8], 1):
-            if isinstance(_rec2, dict):
-                _rp = _rec2.get("priority","")
-                _rr2 = _rec2.get("recommendation","") or _rec2.get("action","")
-                _rd = _rec2.get("deadline","")
-                print(f"\n  {_ri}. [{_rp}] {_rr2}")
-                if _rd: print(f"     Deadline: {_rd}")
-            else:
-                print(f"  {_ri}. {_rec2}")
-
-    # CONTRADICTIONS
-    _contr = _analysis.get("contradictions",[]) or _mods.get("contradictions",{}).get("found",[])
-    if _contr:
-        print(f"\n{_SEP2}")
-        print("  CONTRADICTIONS DETECTED")
-        print(_SEP2)
-        for _c2 in _contr[:5]:
-            _cd = _c2.get("description","") or _c2.get("contradiction","") if isinstance(_c2,dict) else _c2
-            _cs = _c2.get("severity","") if isinstance(_c2,dict) else ""
-            print(f"  {_icon(_cs)} {_cd}")
-
-    # TIME SENSITIVITY ALERTS
-    _ts = _mods.get("time_sensitivity",{})
-    _tal = _ts.get("alerts",[]) if isinstance(_ts,dict) else []
-    if _tal:
-        print(f"\n{_SEP2}")
-        print("  ⏰ TIME SENSITIVITY ALERTS")
-        print(_SEP2)
-        for _ta in _tal:
-            print(f"  {_icon(_ta.get('level',''))} {_ta.get('message','')}")
-
-    # DATA COMPLETENESS
-    _dc2 = _analysis.get("data_completeness") or _mods.get("data_completeness",{})
-    if isinstance(_dc2, dict) and _dc2:
-        _dcp = _dc2.get("percentage", _dc2.get("completeness_pct",""))
-        if _dcp != "":
-            print(f"\n{_SEP2}")
-            print("  DATA COMPLETENESS")
-            print(_SEP2)
-            print(f"  {_bar(_dcp)}  {_dc2.get('reliability','')}")
-            _dmr = _dc2.get("missing_required",[])
-            if _dmr:
-                print("  Missing Required:")
-                for _dmri in _dmr: print(f"    ⚠️  {_dmri}")
-
-    # FOOTER
-    print(f"\n{_SEP}")
-    print("  END OF REPORT")
-    _conf_val = (_analysis.get('confidence_score') or _risk.get('confidence_score') or
-                  _analysis.get('analysis_confidence') or _risk.get('confidence') or
-                  _analysis.get('modules',{}).get('module_confidence',{}).get('overall_confidence',''))
-    _conf_str = f"{_conf_val:.0f}%" if isinstance(_conf_val,(int,float)) else str(_conf_val) if _conf_val else "High (rule-based)"
-    print(f"  Confidence : {_conf_str}")
-    print(f"  Method     : {_risk.get('scoring_method','rule-based')}")
-    print(f"  Engine     : {_analysis.get('engine_version','v10.0')}")
-    print(_SEP)
-    print()
+    main()
