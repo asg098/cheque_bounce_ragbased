@@ -158,18 +158,18 @@ def format_timeline_transparency(timeline_data: Dict) -> Dict:
                 if notice:
                     days_diff = (notice - dishonour).days
 
-                if notice <= notice_deadline:
-                    transparent_timeline['compliance_display']['notice'] = {
-                        'status': '✅ COMPLIANT',
-                        'details': f'Notice issued {days_diff} days after dishonour',
-                        'margin': f'{(notice_deadline - notice).days} days before expiry'
-                    }
-                else:
-                    transparent_timeline['compliance_display']['notice'] = {
-                        'status': '❌ BEYOND LIMITATION',
-                        'details': f'Notice issued {days_diff} days after dishonour',
-                        'exceeded_by': f'{(notice - notice_deadline).days} days late'
-                    }
+                    if notice <= notice_deadline:
+                        transparent_timeline['compliance_display']['notice'] = {
+                            'status': '✅ COMPLIANT',
+                            'details': f'Notice issued {days_diff} days after dishonour',
+                            'margin': f'{(notice_deadline - notice).days} days before expiry'
+                        }
+                    else:
+                        transparent_timeline['compliance_display']['notice'] = {
+                            'status': '❌ BEYOND LIMITATION',
+                            'details': f'Notice issued {days_diff} days after dishonour',
+                            'exceeded_by': f'{(notice - notice_deadline).days} days late'
+                        }
 
         if 'notice_date' in dates:
             try:
@@ -179,56 +179,56 @@ def format_timeline_transparency(timeline_data: Dict) -> Dict:
             if notice:
                 cause_of_action, explanation = get_cause_of_action(notice, 'delivered')
 
-            transparent_timeline['critical_deadlines']['cause_of_action'] = {
-                'date': cause_of_action.isoformat(),
-                'calculation': explanation,
-                'note': 'Limitation starts from this date'
-            }
+                transparent_timeline['critical_deadlines']['cause_of_action'] = {
+                    'date': cause_of_action.isoformat(),
+                    'calculation': explanation,
+                    'note': 'Limitation starts from this date'
+                }
 
-            complaint_deadline = add_calendar_months(cause_of_action, 1)
-            transparent_timeline['critical_deadlines']['complaint_deadline'] = {
-                'last_date': complaint_deadline.isoformat(),
-                'calculation': f'Cause of action ({cause_of_action.isoformat()}) + 1 calendar month',
-                'statutory_basis': 'Section 142 NI Act'
-            }
+                complaint_deadline = add_calendar_months(cause_of_action, 1)
+                transparent_timeline['critical_deadlines']['complaint_deadline'] = {
+                    'last_date': complaint_deadline.isoformat(),
+                    'calculation': f'Cause of action ({cause_of_action.isoformat()}) + 1 calendar month',
+                    'statutory_basis': 'Section 142 NI Act'
+                }
 
-            if 'complaint_filed_date' in dates and notice:
-                try:
-                    complaint = datetime.strptime(dates['complaint_filed_date'], '%Y-%m-%d').date()
-                except (ValueError, TypeError):
-                    complaint = None
-                if complaint and cause_of_action:
-                    days_from_coa = (complaint - cause_of_action).days
+                if 'complaint_filed_date' in dates:
+                    try:
+                        complaint = datetime.strptime(dates['complaint_filed_date'], '%Y-%m-%d').date()
+                    except (ValueError, TypeError):
+                        complaint = None
+                    if complaint and cause_of_action:
+                        days_from_coa = (complaint - cause_of_action).days
 
-                if complaint < cause_of_action:
-                    # Strictly premature — filed before cause of action
-                    days_premature = (cause_of_action - complaint).days
-                    transparent_timeline['compliance_display']['complaint'] = {
-                        'status': '❌ PREMATURE FILING',
-                        'details': f'Filed {days_premature} days BEFORE cause of action arose',
-                        'cause_of_action_date': cause_of_action.isoformat(),
-                        'impact': 'Fatal — complaint filed before 15-day payment period expired'
-                    }
-                elif complaint == cause_of_action:
-                    # Same-day filing — borderline / legally risky
-                    transparent_timeline['compliance_display']['complaint'] = {
-                        'status': '⚠️ SAME-DAY FILING — BORDERLINE RISK',
-                        'details': 'Complaint filed on exact date cause of action arose',
-                        'cause_of_action_date': cause_of_action.isoformat(),
-                        'impact': 'Some courts require filing strictly AFTER cause of action — risk of dismissal'
-                    }
-                elif complaint <= complaint_deadline:
-                    transparent_timeline['compliance_display']['complaint'] = {
-                        'status': '✅ WITHIN LIMITATION',
-                        'details': f'Filed {days_from_coa} days after cause of action',
-                        'margin': f'{(complaint_deadline - complaint).days} days before expiry'
-                    }
-                else:
-                    transparent_timeline['compliance_display']['complaint'] = {
-                        'status': '❌ TIME BARRED',
-                        'details': f'Filed {days_from_coa} days after cause of action',
-                        'exceeded_by': f'{(complaint - complaint_deadline).days} days late - FATAL'
-                    }
+                        if complaint < cause_of_action:
+                            # Strictly premature — filed before cause of action
+                            days_premature = (cause_of_action - complaint).days
+                            transparent_timeline['compliance_display']['complaint'] = {
+                                'status': '❌ PREMATURE FILING',
+                                'details': f'Filed {days_premature} days BEFORE cause of action arose',
+                                'cause_of_action_date': cause_of_action.isoformat(),
+                                'impact': 'Fatal — complaint filed before 15-day payment period expired'
+                            }
+                        elif complaint == cause_of_action:
+                            # Same-day filing — borderline / legally risky
+                            transparent_timeline['compliance_display']['complaint'] = {
+                                'status': '⚠️ SAME-DAY FILING — BORDERLINE RISK',
+                                'details': 'Complaint filed on exact date cause of action arose',
+                                'cause_of_action_date': cause_of_action.isoformat(),
+                                'impact': 'Some courts require filing strictly AFTER cause of action — risk of dismissal'
+                            }
+                        elif complaint <= complaint_deadline:
+                            transparent_timeline['compliance_display']['complaint'] = {
+                                'status': '✅ WITHIN LIMITATION',
+                                'details': f'Filed {days_from_coa} days after cause of action',
+                                'margin': f'{(complaint_deadline - complaint).days} days before expiry'
+                            }
+                        else:
+                            transparent_timeline['compliance_display']['complaint'] = {
+                                'status': '❌ TIME BARRED',
+                                'details': f'Filed {days_from_coa} days after cause of action',
+                                'exceeded_by': f'{(complaint - complaint_deadline).days} days late - FATAL'
+                            }
 
     return transparent_timeline
 
@@ -2943,10 +2943,18 @@ def init_analytics_db():
             analysis_json        TEXT    NOT NULL,
             engine_version       TEXT    DEFAULT 'v10.0',
             processing_time_ms   INTEGER,
+            user_email           TEXT,
             created_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # Migration: add user_email column if it doesn't exist (for existing DBs)
+    try:
+        cursor.execute("ALTER TABLE case_analyses ADD COLUMN user_email TEXT")
+        logger.info("✅ Migration: added user_email column to case_analyses")
+    except sqlite3.OperationalError:
+        pass  # Column already exists — safe to ignore
 
     # ------------------------------------------------------------------
     # TABLE 2: court_intelligence — judicial behaviour per court/judge
@@ -14324,53 +14332,6 @@ def run_consistency_check(analysis_report: Dict) -> Dict:
 
 
 # ============================================================================
-# DAILY LIMIT CHECK - 3 ANALYSES PER DAY
-# ============================================================================
-
-def check_daily_limit(user_email: str) -> Tuple[bool, int]:
-    """
-    Check if user has exceeded daily analysis limit.
-    
-    Args:
-        user_email: User's email address from Firebase Auth
-        
-    Returns:
-        Tuple of (is_allowed: bool, current_count: int)
-        - is_allowed: True if user can analyze, False if limit reached
-        - current_count: Number of analyses used today
-    """
-    if not user_email or not isinstance(user_email, str):
-        # Allow anonymous for backward compatibility, but count as 0
-        return True, 0
-    
-    today = date.today().isoformat()
-    DAILY_LIMIT = 3
-    
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # Count analyses by this email today
-        cursor.execute('''
-            SELECT COUNT(*) FROM case_analyses 
-            WHERE user_email = ? 
-            AND DATE(analysis_timestamp) = ?
-        ''', (user_email, today))
-        
-        count = cursor.fetchone()[0]
-        conn.close()
-        
-        logger.info(f"📊 Daily limit check for {user_email}: {count}/{DAILY_LIMIT} used today")
-        
-        return count < DAILY_LIMIT, count
-        
-    except Exception as e:
-        logger.error(f"❌ Error checking daily limit: {e}")
-        # On error, allow the request (fail open)
-        return True, 0
-
-
-# ============================================================================
 # MAIN ANALYSIS FUNCTION
 # ============================================================================
 
@@ -17560,6 +17521,17 @@ ADMIN_CREDENTIALS = {
         "role": "super_admin"
     }
 }
+
+# ============================================================================
+# DATABASE CONNECTION HELPER
+# ============================================================================
+
+def get_db_connection() -> sqlite3.Connection:
+    """Return a sqlite3 connection to the main analytics database."""
+    analytics_db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(analytics_db_path)
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
 
 # User limits table (stores custom limits per user)
 def init_admin_tables():
