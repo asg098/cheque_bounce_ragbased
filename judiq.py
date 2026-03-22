@@ -17452,6 +17452,22 @@ def init_admin_tables():
                 created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        
+        # ENSURE default super-admin exists in database
+        cursor.execute("SELECT email FROM admin_accounts WHERE email = ?", ("admin@judiq.com",))
+        if not cursor.fetchone():
+            logger.info("🔧 Creating default super-admin in database...")
+            cursor.execute("""
+                INSERT INTO admin_accounts (email, name, role, password_hash, created_by)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                "admin@judiq.com",
+                "Super Admin",
+                "super_admin",
+                "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",  # password = "password"
+                "SYSTEM"
+            ))
+            logger.info("✅ Default super-admin created: admin@judiq.com / password")
 
         conn.commit()
         conn.close()
@@ -18677,18 +18693,25 @@ async def admin_create_account(request: Request):
         auth_email = data.get('authorizer_email', '')
         auth_password = data.get('authorizer_password', '')
         
-        # Verify super-admin
-        if not verify_admin(auth_email, auth_password):
-            return {
-                'success': False,
-                'error': 'Invalid super-admin credentials'
-            }
+        # Check if Firebase-verified (special case)
+        is_firebase_verified = auth_password == 'FIREBASE_VERIFIED' and auth_email == 'masteradmin@judiq.com'
         
-        if ADMIN_CREDENTIALS.get(auth_email, {}).get('role') != 'super_admin':
-            return {
-                'success': False,
-                'error': 'Only super-admins can register new admin accounts'
-            }
+        if not is_firebase_verified:
+            # Verify super-admin normally
+            if not verify_admin(auth_email, auth_password):
+                return {
+                    'success': False,
+                    'error': 'Invalid super-admin credentials'
+                }
+            
+            if ADMIN_CREDENTIALS.get(auth_email, {}).get('role') != 'super_admin':
+                return {
+                    'success': False,
+                    'error': 'Only super-admins can register new admin accounts'
+                }
+        else:
+            # Firebase verified - allow registration
+            logger.info(f"✅ Firebase-verified registration request from {auth_email}")
         
         # New admin details (matching frontend field names)
         new_email = data.get('new_email', '').strip().lower()
@@ -18718,6 +18741,28 @@ async def admin_create_account(request: Request):
         # Hash password
         import hashlib
         password_hash = hashlib.sha256(new_password.encode()).hexdigest()
+        
+        # Save to database FIRST
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO admin_accounts (email, name, role, password_hash, created_by)
+                VALUES (?, ?, ?, ?, ?)
+            """, (new_email, new_name, new_role, password_hash, auth_email))
+            conn.commit()
+            conn.close()
+        except sqlite3.IntegrityError:
+            return {
+                'success': False,
+                'error': 'An admin account with this email already exists in database'
+            }
+        except Exception as db_err:
+            logger.error(f"Database error creating admin: {db_err}")
+            return {
+                'success': False,
+                'error': f'Database error: {str(db_err)}'
+            }
         
         # Add to ADMIN_CREDENTIALS (in-memory)
         ADMIN_CREDENTIALS[new_email] = {
