@@ -10942,8 +10942,8 @@ def save_analysis_to_db(analysis_report: Dict) -> bool:
                 case_id, analysis_timestamp, case_type, cheque_amount,
                 overall_risk_score, compliance_level, fatal_defect_override,
                 fatal_type, timeline_risk, ingredient_compliance,
-                documentary_strength, analysis_json, engine_version
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                documentary_strength, analysis_json, engine_version, user_email
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             analysis_report['case_id'],
             analysis_report.get('analysis_timestamp', ''),
@@ -10957,7 +10957,8 @@ def save_analysis_to_db(analysis_report: Dict) -> bool:
             category_scores.get('Ingredient Compliance', {}).get('score', 0),
             category_scores.get('Documentary Strength', {}).get('score', 0),
             json.dumps(analysis_report),
-            analysis_report.get('engine_version', 'v11.3')  # Updated version
+            analysis_report.get('engine_version', 'v11.3'),  # Updated version
+            analysis_report.get('user_email', '')  # NEW: Store user email for rate limiting
         ))
 
         conn.commit()
@@ -14322,6 +14323,57 @@ def run_consistency_check(analysis_report: Dict) -> Dict:
     }
 
 
+# ============================================================================
+# DAILY LIMIT CHECK - 3 ANALYSES PER DAY
+# ============================================================================
+
+def check_daily_limit(user_email: str) -> Tuple[bool, int]:
+    """
+    Check if user has exceeded daily analysis limit.
+    
+    Args:
+        user_email: User's email address from Firebase Auth
+        
+    Returns:
+        Tuple of (is_allowed: bool, current_count: int)
+        - is_allowed: True if user can analyze, False if limit reached
+        - current_count: Number of analyses used today
+    """
+    if not user_email or not isinstance(user_email, str):
+        # Allow anonymous for backward compatibility, but count as 0
+        return True, 0
+    
+    today = date.today().isoformat()
+    DAILY_LIMIT = 3
+    
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Count analyses by this email today
+        cursor.execute('''
+            SELECT COUNT(*) FROM case_analyses 
+            WHERE user_email = ? 
+            AND DATE(analysis_timestamp) = ?
+        ''', (user_email, today))
+        
+        count = cursor.fetchone()[0]
+        conn.close()
+        
+        logger.info(f"📊 Daily limit check for {user_email}: {count}/{DAILY_LIMIT} used today")
+        
+        return count < DAILY_LIMIT, count
+        
+    except Exception as e:
+        logger.error(f"❌ Error checking daily limit: {e}")
+        # On error, allow the request (fail open)
+        return True, 0
+
+
+# ============================================================================
+# MAIN ANALYSIS FUNCTION
+# ============================================================================
+
 def perform_comprehensive_analysis(case_data: Dict) -> Dict:
 
     analysis_start_time = datetime.now()
@@ -14334,6 +14386,27 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         'engine_version': ENGINE_VERSION,
         'timestamp': analysis_start_time.isoformat()
     }
+
+    # ===== DAILY LIMIT CHECK - 3 ANALYSES PER DAY =====
+    user_email = case_data.get('user_email', '')
+    if user_email:
+        is_allowed, current_count = check_daily_limit(user_email)
+        if not is_allowed:
+            logger.warning(f"🚫 Daily limit reached for {user_email}: {current_count}/3 analyses used")
+            return {
+                'error': 'DAILY_LIMIT_REACHED',
+                'error_type': 'RATE_LIMIT',
+                'message': f'Daily limit of 3 analyses reached. You have used {current_count}/3 analyses today. Please try again tomorrow or upgrade your plan for unlimited analyses.',
+                'count_used': current_count,
+                'daily_limit': 3,
+                'next_reset': (date.today() + timedelta(days=1)).isoformat(),
+                'fatal_flag': True,
+                'overall_status': 'LIMIT REACHED',
+                'engine_version': ENGINE_VERSION,
+                'timestamp': analysis_start_time.isoformat()
+            }
+        else:
+            logger.info(f"✅ Daily limit check passed for {user_email}: {current_count}/3 analyses used")
 
     try:
         if not case_data or not isinstance(case_data, dict):
@@ -14386,6 +14459,7 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
             'scoring_model_version': SCORING_MODEL_VERSION,
             'timeline_math_version': TIMELINE_MATH_VERSION,
             'fatal_flag': False,
+            'user_email': case_data.get('user_email', ''),  # NEW: Store user email for rate limiting
             'case_metadata': {
                 'case_type': case_data.get('case_type'),
                 'cheque_amount': case_data.get('cheque_amount'),
