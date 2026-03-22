@@ -11,6 +11,102 @@ from typing import List, Dict, Optional, Tuple, Any
 from pathlib import Path
 from collections import defaultdict
 
+# ── Firebase Admin SDK ────────────────────────────────────────────────────────
+try:
+    import firebase_admin
+    from firebase_admin import credentials, auth as firebase_auth
+    _FIREBASE_AVAILABLE = True
+except ImportError:
+    _FIREBASE_AVAILABLE = False
+
+_firebase_app = None
+
+def _init_firebase():
+    """Initialize Firebase Admin SDK from environment variables."""
+    global _firebase_app
+    if not _FIREBASE_AVAILABLE:
+        logger_fb = logging.getLogger(__name__)
+        logger_fb.warning("⚠️  firebase-admin not installed — Firebase auth disabled")
+        return False
+    if _firebase_app is not None:
+        return True
+    try:
+        # Accept either a JSON string or a file path
+        fb_cred_raw = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "")
+        fb_cred_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH", "")
+        cred = None
+        if fb_cred_raw.strip():
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tf:
+                tf.write(fb_cred_raw)
+                tmp_path = tf.name
+            cred = credentials.Certificate(tmp_path)
+        elif fb_cred_path and os.path.exists(fb_cred_path):
+            cred = credentials.Certificate(fb_cred_path)
+        else:
+            logging.getLogger(__name__).warning(
+                "⚠️  No Firebase credentials found — set FIREBASE_SERVICE_ACCOUNT_JSON "
+                "or FIREBASE_SERVICE_ACCOUNT_PATH env var"
+            )
+            return False
+        if not firebase_admin._apps:
+            _firebase_app = firebase_admin.initialize_app(cred)
+        else:
+            _firebase_app = firebase_admin.get_app()
+        logging.getLogger(__name__).info("✅ Firebase Admin SDK initialized")
+        return True
+    except Exception as _e:
+        logging.getLogger(__name__).error(f"❌ Firebase init failed: {_e}")
+        return False
+
+
+def verify_firebase_token(id_token: str) -> Optional[Dict]:
+    """
+    Verify a Firebase ID token.
+    Returns decoded token dict on success, None on failure.
+    """
+    if not _FIREBASE_AVAILABLE:
+        return None
+    if not _init_firebase():
+        return None
+    try:
+        decoded = firebase_auth.verify_id_token(id_token, check_revoked=True)
+        return decoded
+    except Exception as _e:
+        logging.getLogger(__name__).warning(f"Firebase token verify failed: {_e}")
+        return None
+
+
+def get_firebase_uid_from_request(request) -> Optional[str]:
+    """
+    Extract and verify Firebase Bearer token from Authorization header.
+    Returns uid string on success, None on failure.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None
+    token = auth_header[7:]
+    decoded = verify_firebase_token(token)
+    if decoded:
+        return decoded.get("uid")
+    return None
+
+
+def get_firebase_user_email(request) -> Optional[str]:
+    """
+    Extract verified user email from Firebase token in Authorization header.
+    Returns email string on success, None on failure.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None
+    token = auth_header[7:]
+    decoded = verify_firebase_token(token)
+    if decoded:
+        return decoded.get("email")
+    return None
+# ─────────────────────────────────────────────────────────────────────────────
+
 try:
     import pandas as pd
     PANDAS_AVAILABLE = True
@@ -1185,6 +1281,15 @@ CONFIG = {
 
     "GDRIVE_API_KEY": os.getenv("GDRIVE_API_KEY", ""),
 
+    # ── Firebase ──────────────────────────────────────────────────────────────
+    # Set ONE of these in Render environment variables:
+    #   FIREBASE_SERVICE_ACCOUNT_JSON  = raw JSON string of your service account key
+    #   FIREBASE_SERVICE_ACCOUNT_PATH  = absolute path to the service account JSON file
+    # Get it: Firebase Console → Project Settings → Service Accounts → Generate new private key
+    "FIREBASE_SERVICE_ACCOUNT_JSON": os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", ""),
+    "FIREBASE_SERVICE_ACCOUNT_PATH": os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH", ""),
+    "FIREBASE_PROJECT_ID": os.getenv("FIREBASE_PROJECT_ID", ""),
+    # ─────────────────────────────────────────────────────────────────────────
 
     "CACHE_TTL": 7200,
 
@@ -12565,6 +12670,11 @@ async def lifespan(app: FastAPI):
     print(f"📂 Data directory: {DATA_DIR}")
     init_analytics_db()
 
+    # ── Firebase init ──────────────────────────────────────────────────────
+    _fb_ok = _init_firebase()
+    print(f"🔥 Firebase Auth: {'✅ Connected' if _fb_ok else '⚠️  Disabled (set FIREBASE_SERVICE_ACCOUNT_JSON env var)'}")
+    # ───────────────────────────────────────────────────────────────────────
+
 
     print("\n" + "="*80)
     print("📚 LOADING KNOWLEDGE BASE FROM GOOGLE DRIVE")
@@ -18588,23 +18698,33 @@ def _build_complaint_draft(case_data: dict) -> dict:
 async def create_admin_account(request: Request):
     """
     Create a new admin account.
-    Requires an existing super_admin to authorize creation.
-    Body: { authorizer_email, authorizer_password, new_email, new_password, new_name, role }
+    Authorization options:
+      1. Firebase token (Bearer <token>) — the token's email must be an existing super_admin
+      2. Classic body: { authorizer_email, authorizer_password, new_email, new_password, new_name, role }
     """
     try:
         data = await request.json()
-        auth_email = data.get('authorizer_email', '')
-        auth_pw    = data.get('authorizer_password', '')
+
+        # ── Resolve authorizer identity ────────────────────────────────────
+        firebase_email = get_firebase_user_email(request)
+        if firebase_email:
+            auth_email = firebase_email.lower().strip()
+            if auth_email not in ADMIN_CREDENTIALS:
+                return {'success': False, 'error': 'Firebase user is not a registered admin'}
+            if ADMIN_CREDENTIALS[auth_email].get('role') != 'super_admin':
+                return {'success': False, 'error': 'Only super_admin can create new admin accounts'}
+        else:
+            auth_email = data.get('authorizer_email', '').lower().strip()
+            auth_pw    = data.get('authorizer_password', '')
+            if not verify_admin(auth_email, auth_pw):
+                return {'success': False, 'error': 'Unauthorized — invalid authorizer credentials'}
+            if ADMIN_CREDENTIALS.get(auth_email, {}).get('role') != 'super_admin':
+                return {'success': False, 'error': 'Only super_admin can create new admin accounts'}
+
         new_email  = data.get('new_email', '').strip().lower()
         new_pw     = data.get('new_password', '')
         new_name   = data.get('new_name', '').strip()
         role       = data.get('role', 'admin')
-
-        if not verify_admin(auth_email, auth_pw):
-            return {'success': False, 'error': 'Unauthorized — invalid authorizer credentials'}
-
-        if ADMIN_CREDENTIALS.get(auth_email, {}).get('role') != 'super_admin':
-            return {'success': False, 'error': 'Only super_admin can create new admin accounts'}
 
         if not new_email or not new_pw or not new_name:
             return {'success': False, 'error': 'new_email, new_password, and new_name are required'}
@@ -18653,29 +18773,48 @@ async def create_admin_account(request: Request):
 
 
 @app.post("/admin/login")
-
 async def admin_login(request: Request):
-    """Admin authentication endpoint"""
+    """
+    Admin authentication endpoint.
+    Accepts either:
+      - { email, password }  — classic password auth
+      - Authorization: Bearer <firebase-id-token>  — Firebase token auth (email must match an admin)
+    """
     try:
+        # ── Firebase token path ────────────────────────────────────────────
+        firebase_email = get_firebase_user_email(request)
+        if firebase_email:
+            email = firebase_email.lower().strip()
+            if email in ADMIN_CREDENTIALS:
+                log_admin_action(email, "LOGIN_FIREBASE", None, "Firebase token login")
+                return {
+                    'success': True,
+                    'auth_method': 'firebase',
+                    'admin': {
+                        'email': email,
+                        'name': ADMIN_CREDENTIALS[email]['name'],
+                        'role': ADMIN_CREDENTIALS[email]['role']
+                    }
+                }
+            return {'success': False, 'error': 'Firebase user is not a registered admin'}
+
+        # ── Classic password path ──────────────────────────────────────────
         data = await request.json()
-        email = data.get('email', '')
+        email = data.get('email', '').lower().strip()
         password = data.get('password', '')
 
         if verify_admin(email, password):
-            log_admin_action(email, "LOGIN", None, "Successful admin login")
+            log_admin_action(email, "LOGIN_PASSWORD", None, "Password login")
             return {
                 'success': True,
+                'auth_method': 'password',
                 'admin': {
                     'email': email,
                     'name': ADMIN_CREDENTIALS[email]['name'],
                     'role': ADMIN_CREDENTIALS[email]['role']
                 }
             }
-        else:
-            return {
-                'success': False,
-                'error': 'Invalid admin credentials'
-            }
+        return {'success': False, 'error': 'Invalid admin credentials'}
     except Exception as e:
         logger.error(f"Admin login error: {e}")
         return {'success': False, 'error': str(e)}
@@ -18684,14 +18823,20 @@ async def admin_login(request: Request):
 async def admin_create_account_open(request: Request):
     """
     TEMPORARY: Open admin registration for initial setup.
-    No authorization required - anyone can create first admin accounts.
-    DELETE THIS ENDPOINT after creating your admin account!
+    If Firebase credentials are configured, the caller must supply a valid
+    Firebase ID token (Authorization: Bearer <token>) — the token email becomes
+    the creator identity.  If Firebase is not configured, no auth is required.
+    DELETE or DISABLE this endpoint after creating your first admin account!
     """
     try:
         data = await request.json()
-        
-        logger.warning("⚠️ OPEN admin registration attempt - this endpoint should be disabled after setup!")
-        
+
+        # Determine creator identity
+        fb_email = get_firebase_user_email(request)
+        creator_identity = fb_email.lower().strip() if fb_email else "OPEN_REGISTRATION"
+
+        logger.warning(f"⚠️ OPEN admin registration by {creator_identity}")
+
         # New admin details
         new_email = data.get('new_email', '').strip().lower()
         new_name = data.get('new_name', '').strip()
@@ -18728,7 +18873,7 @@ async def admin_create_account_open(request: Request):
             cursor.execute("""
                 INSERT INTO admin_accounts (email, name, role, password_hash, created_by)
                 VALUES (?, ?, ?, ?, ?)
-            """, (new_email, new_name, new_role, password_hash, 'OPEN_REGISTRATION'))
+            """, (new_email, new_name, new_role, password_hash, creator_identity))
             conn.commit()
             conn.close()
         except sqlite3.IntegrityError:
@@ -18751,7 +18896,7 @@ async def admin_create_account_open(request: Request):
         }
         
         # Log the action
-        log_admin_action('SYSTEM', "OPEN_REGISTRATION", new_email, f"Registered via open endpoint: {new_name} ({new_role})")
+        log_admin_action(creator_identity, "OPEN_REGISTRATION", new_email, f"Registered via open endpoint: {new_name} ({new_role})")
         
         logger.info(f"✅ Admin registered via OPEN endpoint: {new_email} ({new_role})")
         logger.warning("🚨 Remember to disable /admin/create-account-open endpoint after setup!")
@@ -18771,8 +18916,13 @@ async def admin_create_account_open(request: Request):
         return {'success': False, 'error': str(e)}
 
 @app.get("/admin/users")
-async def get_all_users(admin_email: str):
+async def get_all_users(admin_email: str = "", request: Request = None):
     """Get all users with their usage stats"""
+    # Firebase token takes precedence over query param
+    if request:
+        fb_email = get_firebase_user_email(request)
+        if fb_email:
+            admin_email = fb_email.lower().strip()
     if admin_email not in ADMIN_CREDENTIALS:
         raise HTTPException(status_code=403, detail="Admin access required")
 
@@ -18840,11 +18990,16 @@ async def set_user_limit(request: Request):
     """Set custom daily limit for a user"""
     try:
         data = await request.json()
-        admin_email = data.get('admin_email')
+        admin_email = data.get('admin_email', '')
         user_email = data.get('user_email')
         daily_limit = data.get('daily_limit', 3)
         is_unlimited = data.get('is_unlimited', False)
         reason = data.get('reason', '')
+
+        # Firebase token overrides body admin_email
+        fb_email = get_firebase_user_email(request)
+        if fb_email:
+            admin_email = fb_email.lower().strip()
 
         if admin_email not in ADMIN_CREDENTIALS:
             raise HTTPException(status_code=403, detail="Admin access required")
@@ -18879,8 +19034,12 @@ async def set_user_limit(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/admin/analytics")
-async def get_admin_analytics(admin_email: str):
+async def get_admin_analytics(admin_email: str = "", request: Request = None):
     """Get comprehensive analytics for admin dashboard"""
+    if request:
+        fb_email = get_firebase_user_email(request)
+        if fb_email:
+            admin_email = fb_email.lower().strip()
     if admin_email not in ADMIN_CREDENTIALS:
         raise HTTPException(status_code=403, detail="Admin access required")
 
@@ -19041,8 +19200,12 @@ async def get_user_case_history(user_email: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/admin/all-analyses")
-async def get_all_analyses(admin_email: str, limit: int = 100, offset: int = 0):
+async def get_all_analyses(admin_email: str = "", limit: int = 100, offset: int = 0, request: Request = None):
     """Get all analyses with full details"""
+    if request:
+        fb_email = get_firebase_user_email(request)
+        if fb_email:
+            admin_email = fb_email.lower().strip()
     if admin_email not in ADMIN_CREDENTIALS:
         raise HTTPException(status_code=403, detail="Admin access required")
 
@@ -19101,8 +19264,12 @@ async def get_all_analyses(admin_email: str, limit: int = 100, offset: int = 0):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/admin/activity-log")
-async def get_admin_activity_log(admin_email: str, limit: int = 50):
+async def get_admin_activity_log(admin_email: str = "", limit: int = 50, request: Request = None):
     """Get admin activity log"""
+    if request:
+        fb_email = get_firebase_user_email(request)
+        if fb_email:
+            admin_email = fb_email.lower().strip()
     if admin_email not in ADMIN_CREDENTIALS:
         raise HTTPException(status_code=403, detail="Admin access required")
 
@@ -19137,6 +19304,186 @@ async def get_admin_activity_log(admin_email: str, limit: int = 50):
         logger.error(f"Error getting activity log: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+
+
+# ── Firebase Utility Endpoints ────────────────────────────────────────────────
+
+@app.get("/firebase/status")
+async def firebase_status():
+    """Check Firebase Admin SDK connection status."""
+    fb_ok = _init_firebase()
+    return {
+        "firebase_available": _FIREBASE_AVAILABLE,
+        "firebase_connected": fb_ok,
+        "project_id": CONFIG.get("FIREBASE_PROJECT_ID", ""),
+        "message": (
+            "Firebase Auth active"
+            if fb_ok
+            else "Firebase disabled — set FIREBASE_SERVICE_ACCOUNT_JSON env var"
+        )
+    }
+
+
+@app.post("/firebase/verify-token")
+async def firebase_verify_token(request: Request):
+    """
+    Verify a Firebase ID token and return the decoded claims.
+    Body: { "id_token": "<firebase-id-token>" }
+    Or:   Authorization: Bearer <firebase-id-token>
+    Returns decoded uid, email, and whether user is a registered admin.
+    """
+    try:
+        id_token = None
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            id_token = auth_header[7:]
+        else:
+            body = await request.json()
+            id_token = body.get("id_token", "")
+
+        if not id_token:
+            return {"success": False, "error": "No id_token provided"}
+
+        decoded = verify_firebase_token(id_token)
+        if not decoded:
+            return {"success": False, "error": "Invalid or expired Firebase token"}
+
+        uid   = decoded.get("uid")
+        email = decoded.get("email", "").lower().strip()
+        is_admin = email in ADMIN_CREDENTIALS
+        admin_role = ADMIN_CREDENTIALS.get(email, {}).get("role") if is_admin else None
+
+        return {
+            "success": True,
+            "uid": uid,
+            "email": email,
+            "is_admin": is_admin,
+            "admin_role": admin_role,
+            "token_claims": {k: v for k, v in decoded.items()
+                             if k not in ("uid", "email", "iat", "exp", "aud", "iss", "sub")}
+        }
+    except Exception as e:
+        logger.error(f"Firebase verify-token error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/firebase/link-admin")
+async def firebase_link_admin(request: Request):
+    """
+    Link a Firebase UID to an existing admin account.
+    Requires super_admin authorization (password or Firebase token).
+    Body: { authorizer_email, authorizer_password, target_admin_email, firebase_uid }
+    """
+    try:
+        data = await request.json()
+
+        # Authorizer resolution
+        fb_email = get_firebase_user_email(request)
+        if fb_email:
+            auth_email = fb_email.lower().strip()
+            if auth_email not in ADMIN_CREDENTIALS:
+                return {"success": False, "error": "Firebase user is not a registered admin"}
+            if ADMIN_CREDENTIALS[auth_email].get("role") != "super_admin":
+                return {"success": False, "error": "Only super_admin can link Firebase UIDs"}
+        else:
+            auth_email = data.get("authorizer_email", "").lower().strip()
+            auth_pw    = data.get("authorizer_password", "")
+            if not verify_admin(auth_email, auth_pw):
+                return {"success": False, "error": "Invalid authorizer credentials"}
+            if ADMIN_CREDENTIALS.get(auth_email, {}).get("role") != "super_admin":
+                return {"success": False, "error": "Only super_admin can link Firebase UIDs"}
+
+        target_email = data.get("target_admin_email", "").lower().strip()
+        firebase_uid = data.get("firebase_uid", "").strip()
+
+        if not target_email or not firebase_uid:
+            return {"success": False, "error": "target_admin_email and firebase_uid are required"}
+
+        if target_email not in ADMIN_CREDENTIALS:
+            return {"success": False, "error": "Target admin account not found"}
+
+        # Persist firebase_uid in admin_accounts table
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            # Add firebase_uid column if missing (idempotent)
+            cursor.execute("PRAGMA table_info(admin_accounts)")
+            cols = [row[1] for row in cursor.fetchall()]
+            if "firebase_uid" not in cols:
+                cursor.execute("ALTER TABLE admin_accounts ADD COLUMN firebase_uid TEXT")
+            cursor.execute(
+                "UPDATE admin_accounts SET firebase_uid = ? WHERE email = ?",
+                (firebase_uid, target_email)
+            )
+            conn.commit()
+            conn.close()
+        except Exception as db_e:
+            logger.warning(f"Could not persist firebase_uid: {db_e}")
+
+        ADMIN_CREDENTIALS[target_email]["firebase_uid"] = firebase_uid
+        log_admin_action(auth_email, "LINK_FIREBASE_UID", target_email,
+                         f"Linked Firebase UID {firebase_uid}")
+
+        return {
+            "success": True,
+            "message": f"Firebase UID linked to {target_email}",
+            "firebase_uid": firebase_uid
+        }
+    except Exception as e:
+        logger.error(f"firebase_link_admin error: {e}")
+        return {"success": False, "error": str(e)}
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@app.post("/user/firebase-auth")
+async def user_firebase_auth(request: Request):
+    """
+    Authenticate a regular user via Firebase ID token.
+    Returns user email, uid, and current usage/limit status.
+    Send: Authorization: Bearer <firebase-id-token>
+    """
+    try:
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            body = await request.json()
+            id_token = body.get("id_token", "")
+        else:
+            id_token = auth_header[7:]
+
+        if not id_token:
+            return {"success": False, "error": "No Firebase token provided"}
+
+        decoded = verify_firebase_token(id_token)
+        if not decoded:
+            return {"success": False, "error": "Invalid or expired Firebase token"}
+
+        uid   = decoded.get("uid")
+        email = decoded.get("email", "").lower().strip()
+
+        if not email:
+            return {"success": False, "error": "Firebase token has no email claim"}
+
+        # Get usage status
+        can_analyze, used = check_daily_limit(email)
+        user_limit = get_user_limit(email)
+
+        return {
+            "success": True,
+            "uid": uid,
+            "email": email,
+            "is_admin": email in ADMIN_CREDENTIALS,
+            "usage": {
+                "used_today": used,
+                "daily_limit": user_limit,
+                "can_analyze": can_analyze,
+                "remaining": max(0, user_limit - used)
+            }
+        }
+    except Exception as e:
+        logger.error(f"user_firebase_auth error: {e}")
+        return {"success": False, "error": str(e)}
 
 if __name__ == "__main__":
     main()
