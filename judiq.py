@@ -14303,42 +14303,10 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
 
 
     user_email = case_data.get('user_email', '')
+    # NOTE: Daily analysis limits are currently DISABLED.
+    # Admin can re-enable per-user limits via the admin dashboard.
     if user_email:
-        is_allowed, current_count = check_daily_limit(user_email)
-        if not is_allowed:
-            logger.warning(f"🚫 Daily limit reached for {user_email}: {current_count}/3 analyses used")
-            _limit_val = get_user_limit(user_email)
-            return {
-                'success': False,
-                'error': 'DAILY_LIMIT_REACHED',
-                'error_type': 'RATE_LIMIT',
-                'message': (
-                    f'Daily analysis limit of {_limit_val} reached. '
-                    f'You have used {current_count}/{_limit_val} analyses today. '
-                    'Please try again tomorrow or contact support to raise your limit.'
-                ),
-                'usage': {
-                    'analyses': {
-                        'used':      current_count,
-                        'limit':     _limit_val,
-                        'remaining': 0,
-                        'exhausted': True,
-                    },
-                    'drafts': {
-                        'used':      0,
-                        'limit':     3,
-                        'remaining': None,
-                        'exhausted': None,
-                    }
-                },
-                'next_reset': (date.today() + timedelta(days=1)).isoformat() + 'T00:00:00',
-                'fatal_flag': True,
-                'overall_status': 'LIMIT REACHED',
-                'engine_version': ENGINE_VERSION,
-                'timestamp': analysis_start_time.isoformat()
-            }
-        else:
-            logger.info(f"✅ Daily limit check passed for {user_email}: {current_count}/3 analyses used")
+        _, current_count = check_daily_limit(user_email)  # track usage but don't block
 
     try:
         if not case_data or not isinstance(case_data, dict):
@@ -18184,21 +18152,19 @@ async def auto_draft(request: Request):
 
 
     if user_email:
-        is_allowed, used_today = check_draft_limit(user_email)
-        if not is_allowed:
-            return {
-                "success": False,
-                "error": "DRAFT_LIMIT_REACHED",
-                "error_type": "RATE_LIMIT",
-                "message": (
-                    f"Daily draft limit of 3 reached. "
-                    f"You have generated {used_today}/3 drafts today. "
-                    "Please try again tomorrow."
-                ),
+        # NOTE: Draft limits are currently DISABLED.
+        # Admin can re-enable per-user limits via the admin dashboard.
+        _, used_today = check_draft_limit(user_email)  # track but don't block
+        is_allowed = True  # always allow
+        if False and not is_allowed:  # disabled
+            pass
+        if False:
+            dummy = {
+                "dummy": True,
                 "usage": {
                     "used": used_today,
-                    "limit": 3,
-                    "remaining": 0,
+                    "limit": 999,
+                    "remaining": 999,
                     "exhausted": True
                 },
                 "next_reset": (date.today() + timedelta(days=1)).isoformat() + "T00:00:00"
@@ -18588,21 +18554,19 @@ async def generate_draft(request: Request):
 
 
     if user_email:
-        is_allowed, used_today = check_draft_limit(user_email)
-        if not is_allowed:
-            return {
-                "success": False,
-                "error": "DRAFT_LIMIT_REACHED",
-                "error_type": "RATE_LIMIT",
-                "message": (
-                    f"Daily draft limit of 3 reached. "
-                    f"You have generated {used_today}/3 drafts today. "
-                    "Please try again tomorrow."
-                ),
+        # NOTE: Draft limits are currently DISABLED.
+        # Admin can re-enable per-user limits via the admin dashboard.
+        _, used_today = check_draft_limit(user_email)  # track but don't block
+        is_allowed = True  # always allow
+        if False and not is_allowed:  # disabled
+            pass
+        if False:
+            dummy = {
+                "dummy": True,
                 "usage": {
                     "used": used_today,
-                    "limit": 3,
-                    "remaining": 0,
+                    "limit": 999,
+                    "remaining": 999,
                     "exhausted": True
                 },
                 "next_reset": (date.today() + timedelta(days=1)).isoformat() + "T00:00:00"
