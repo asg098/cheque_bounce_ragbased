@@ -18664,6 +18664,87 @@ async def admin_login(request: Request):
         logger.error(f"Admin login error: {e}")
         return {'success': False, 'error': str(e)}
 
+@app.post("/admin/create-account")
+async def admin_create_account(request: Request):
+    """
+    Register a new admin account.
+    Requires super-admin authorization.
+    """
+    try:
+        data = await request.json()
+        
+        # Super-admin authorization (frontend sends these fields)
+        auth_email = data.get('authorizer_email', '')
+        auth_password = data.get('authorizer_password', '')
+        
+        # Verify super-admin
+        if not verify_admin(auth_email, auth_password):
+            return {
+                'success': False,
+                'error': 'Invalid super-admin credentials'
+            }
+        
+        if ADMIN_CREDENTIALS.get(auth_email, {}).get('role') != 'super_admin':
+            return {
+                'success': False,
+                'error': 'Only super-admins can register new admin accounts'
+            }
+        
+        # New admin details (matching frontend field names)
+        new_email = data.get('new_email', '').strip().lower()
+        new_name = data.get('new_name', '').strip()
+        new_password = data.get('new_password', '')
+        new_role = data.get('role', 'admin')
+        
+        # Validation
+        if not new_email or not new_name or not new_password:
+            return {
+                'success': False,
+                'error': 'Email, name, and password are required'
+            }
+        
+        if len(new_password) < 8:
+            return {
+                'success': False,
+                'error': 'Password must be at least 8 characters long'
+            }
+        
+        if new_email in ADMIN_CREDENTIALS:
+            return {
+                'success': False,
+                'error': 'An admin account with this email already exists'
+            }
+        
+        # Hash password
+        import hashlib
+        password_hash = hashlib.sha256(new_password.encode()).hexdigest()
+        
+        # Add to ADMIN_CREDENTIALS (in-memory)
+        ADMIN_CREDENTIALS[new_email] = {
+            'password_hash': password_hash,
+            'name': new_name,
+            'role': new_role
+        }
+        
+        # Log the action
+        log_admin_action(auth_email, "REGISTER_ADMIN", new_email, f"Registered new {new_role}: {new_name}")
+        
+        logger.info(f"✅ New admin registered: {new_email} ({new_role}) by {auth_email}")
+        
+        return {
+            'success': True,
+            'message': f'Admin account created successfully for {new_email}',
+            'admin': {
+                'email': new_email,
+                'name': new_name,
+                'role': new_role
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Admin registration error: {e}")
+        return {'success': False, 'error': str(e)}
+
 @app.get("/admin/users")
 async def get_all_users(admin_email: str):
     """Get all users with their usage stats"""
