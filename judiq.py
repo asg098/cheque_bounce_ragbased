@@ -17077,6 +17077,7 @@ async def get_analytics_summary():
                 "success": True,
                 "total_analyses": 0,
                 "average_risk_score": 0,
+                "avg_score": 0,
                 "compliance_distribution": {},
                 "message": "No analyses yet - database initialized"
             }
@@ -17100,6 +17101,7 @@ async def get_analytics_summary():
             "success": True,
             "total_analyses": total_analyses,
             "average_risk_score": round(avg_risk, 1),
+            "avg_score": round(avg_risk, 1),
             "compliance_distribution": compliance_dist
         }
     except Exception as e:
@@ -17109,6 +17111,7 @@ async def get_analytics_summary():
             "success": True,
             "total_analyses": 0,
             "average_risk_score": 0,
+            "avg_score": 0,
             "compliance_distribution": {},
             "error": "Analytics temporarily unavailable"
         }
@@ -17369,6 +17372,27 @@ def get_db_connection() -> sqlite3.Connection:
     return conn
 
 
+def _load_db_admins():
+    """Load persisted admin accounts from DB into ADMIN_CREDENTIALS memory dict."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT email, name, role, password_hash FROM admin_accounts")
+        for row in cursor.fetchall():
+            email, name, role, pw_hash = row
+            if email not in ADMIN_CREDENTIALS:
+                ADMIN_CREDENTIALS[email] = {
+                    "password_hash": pw_hash,
+                    "name": name,
+                    "role": role
+                }
+        conn.close()
+        loaded = len(ADMIN_CREDENTIALS)
+        logger.info(f"✅ Loaded {loaded} admin account(s) into memory")
+    except Exception as e:
+        logger.warning(f"Could not load DB admins: {e}")
+
+
 def init_admin_tables():
     """Initialize admin-related database tables"""
     try:
@@ -17418,9 +17442,21 @@ def init_admin_tables():
             "CREATE INDEX IF NOT EXISTS idx_draft_ts ON draft_logs(draft_timestamp)"
         )
 
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS admin_accounts (
+                email       TEXT PRIMARY KEY,
+                name        TEXT NOT NULL,
+                role        TEXT NOT NULL DEFAULT 'admin',
+                password_hash TEXT NOT NULL,
+                created_by  TEXT,
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         conn.commit()
         conn.close()
         logger.info("✅ Admin tables initialized")
+        _load_db_admins()
         return True
     except Exception as e:
         logger.error(f"❌ Error initializing admin tables: {e}")
@@ -18571,6 +18607,18 @@ async def create_admin_account(request: Request):
             'name': new_name,
             'role': role
         }
+
+        try:
+            _conn = get_db_connection()
+            _cur = _conn.cursor()
+            _cur.execute("""
+                INSERT OR REPLACE INTO admin_accounts (email, name, role, password_hash, created_by)
+                VALUES (?, ?, ?, ?, ?)
+            """, (new_email, new_name, role, pw_hash, auth_email))
+            _conn.commit()
+            _conn.close()
+        except Exception as _db_e:
+            logger.warning(f"Could not persist admin to DB: {_db_e}")
 
         log_admin_action(auth_email, 'CREATE_ADMIN', new_email,
                          f'Created new {role} account: {new_name}')
