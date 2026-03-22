@@ -1288,7 +1288,11 @@ CONFIG = {
     # Get it: Firebase Console → Project Settings → Service Accounts → Generate new private key
     "FIREBASE_SERVICE_ACCOUNT_JSON": os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", ""),
     "FIREBASE_SERVICE_ACCOUNT_PATH": os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH", ""),
-    "FIREBASE_PROJECT_ID": os.getenv("FIREBASE_PROJECT_ID", ""),
+    "FIREBASE_PROJECT_ID":        os.getenv("FIREBASE_PROJECT_ID",        "idcourt-cb58f"),
+    "FIREBASE_AUTH_DOMAIN":       os.getenv("FIREBASE_AUTH_DOMAIN",       "idcourt-cb58f.firebaseapp.com"),
+    "FIREBASE_APP_ID":            os.getenv("FIREBASE_APP_ID",            "1:941086914513:web:8edad96b7e9f0dd4be12f0"),
+    "FIREBASE_MESSAGING_SENDER_ID": os.getenv("FIREBASE_MESSAGING_SENDER_ID", "941086914513"),
+    "FIREBASE_MEASUREMENT_ID":    os.getenv("FIREBASE_MEASUREMENT_ID",    "G-YQMJ6KXGBR"),
     # ─────────────────────────────────────────────────────────────────────────
 
     "CACHE_TTL": 7200,
@@ -19311,16 +19315,23 @@ async def get_admin_activity_log(admin_email: str = "", limit: int = 50, request
 
 @app.get("/firebase/status")
 async def firebase_status():
-    """Check Firebase Admin SDK connection status."""
+    """Check Firebase Admin SDK connection status and return project config."""
     fb_ok = _init_firebase()
     return {
         "firebase_available": _FIREBASE_AVAILABLE,
         "firebase_connected": fb_ok,
-        "project_id": CONFIG.get("FIREBASE_PROJECT_ID", ""),
+        "project": {
+            "project_id":          CONFIG.get("FIREBASE_PROJECT_ID",         "idcourt-cb58f"),
+            "auth_domain":         CONFIG.get("FIREBASE_AUTH_DOMAIN",        "idcourt-cb58f.firebaseapp.com"),
+            "app_id":              CONFIG.get("FIREBASE_APP_ID",             "1:941086914513:web:8edad96b7e9f0dd4be12f0"),
+            "messaging_sender_id": CONFIG.get("FIREBASE_MESSAGING_SENDER_ID","941086914513"),
+            "measurement_id":      CONFIG.get("FIREBASE_MEASUREMENT_ID",     "G-YQMJ6KXGBR"),
+            "storage_bucket":      "idcourt-cb58f.firebasestorage.app",
+        },
         "message": (
-            "Firebase Auth active"
+            "Firebase Auth active — project: idcourt-cb58f"
             if fb_ok
-            else "Firebase disabled — set FIREBASE_SERVICE_ACCOUNT_JSON env var"
+            else "Firebase disabled — set FIREBASE_SERVICE_ACCOUNT_JSON env var in Render"
         )
     }
 
