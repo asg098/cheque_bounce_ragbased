@@ -18532,6 +18532,62 @@ def _build_complaint_draft(case_data: dict) -> dict:
 
     return {"full_text": full_text, "sections": sections}
 
+@app.post("/admin/create-account")
+async def create_admin_account(request: Request):
+    """
+    Create a new admin account.
+    Requires an existing super_admin to authorize creation.
+    Body: { authorizer_email, authorizer_password, new_email, new_password, new_name, role }
+    """
+    try:
+        data = await request.json()
+        auth_email = data.get('authorizer_email', '')
+        auth_pw    = data.get('authorizer_password', '')
+        new_email  = data.get('new_email', '').strip().lower()
+        new_pw     = data.get('new_password', '')
+        new_name   = data.get('new_name', '').strip()
+        role       = data.get('role', 'admin')
+
+        if not verify_admin(auth_email, auth_pw):
+            return {'success': False, 'error': 'Unauthorized — invalid authorizer credentials'}
+
+        if ADMIN_CREDENTIALS.get(auth_email, {}).get('role') != 'super_admin':
+            return {'success': False, 'error': 'Only super_admin can create new admin accounts'}
+
+        if not new_email or not new_pw or not new_name:
+            return {'success': False, 'error': 'new_email, new_password, and new_name are required'}
+
+        if len(new_pw) < 8:
+            return {'success': False, 'error': 'Password must be at least 8 characters'}
+
+        if new_email in ADMIN_CREDENTIALS:
+            return {'success': False, 'error': 'An admin account with this email already exists'}
+
+        import hashlib as _hl
+        pw_hash = _hl.sha256(new_pw.encode()).hexdigest()
+
+        ADMIN_CREDENTIALS[new_email] = {
+            'password_hash': pw_hash,
+            'name': new_name,
+            'role': role
+        }
+
+        log_admin_action(auth_email, 'CREATE_ADMIN', new_email,
+                         f'Created new {role} account: {new_name}')
+
+        logger.info(f'New admin account created: {new_email} (role={role}) by {auth_email}')
+
+        return {
+            'success': True,
+            'message': f'Admin account created for {new_email}',
+            'admin': {'email': new_email, 'name': new_name, 'role': role}
+        }
+
+    except Exception as e:
+        logger.error(f'Admin account creation error: {e}')
+        return {'success': False, 'error': str(e)}
+
+
 @app.post("/admin/login")
 
 async def admin_login(request: Request):
