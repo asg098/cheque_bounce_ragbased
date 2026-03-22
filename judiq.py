@@ -17989,6 +17989,10 @@ async def get_user_case_history(user_email: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/admin/all-analyses")
+async def get_all_analyses(admin_email: str, limit: int = 100, offset: int = 0):
+    """Get all analyses with full details"""
+    if admin_email not in ADMIN_CREDENTIALS:
+        raise HTTPException(status_code=403, detail="Admin access required")
     
     try:
         conn = get_db_connection()
