@@ -18718,6 +18718,23 @@ async def admin_create_account(request: Request):
         new_name = data.get('new_name', '').strip()
         new_password = data.get('new_password', '')
         new_role = data.get('role', 'admin')
+
+@app.post("/admin/create-account-open")
+async def admin_create_account_open(request: Request):
+    """
+    TEMPORARY: Open admin registration for initial setup.
+    No authorization required - anyone can create first admin accounts.
+    """
+    try:
+        data = await request.json()
+        
+        logger.info("⚠️ Open admin registration attempt")
+        
+        # New admin details
+        new_email = data.get('new_email', '').strip().lower()
+        new_name = data.get('new_name', '').strip()
+        new_password = data.get('new_password', '')
+        new_role = data.get('role', 'admin')
         
         # Validation
         if not new_email or not new_name or not new_password:
@@ -18788,6 +18805,96 @@ async def admin_create_account(request: Request):
         
     except Exception as e:
         logger.error(f"Admin registration error: {e}")
+        return {'success': False, 'error': str(e)}
+
+@app.post("/admin/create-account-open")
+async def admin_create_account_open(request: Request):
+    """
+    TEMPORARY: Open admin registration for initial setup.
+    No authorization required - anyone can create first admin accounts.
+    DELETE THIS ENDPOINT after creating your admin account!
+    """
+    try:
+        data = await request.json()
+        
+        logger.warning("⚠️ OPEN admin registration attempt - this endpoint should be disabled after setup!")
+        
+        # New admin details
+        new_email = data.get('new_email', '').strip().lower()
+        new_name = data.get('new_name', '').strip()
+        new_password = data.get('new_password', '')
+        new_role = data.get('role', 'admin')
+        
+        # Validation
+        if not new_email or not new_name or not new_password:
+            return {
+                'success': False,
+                'error': 'Email, name, and password are required'
+            }
+        
+        if len(new_password) < 8:
+            return {
+                'success': False,
+                'error': 'Password must be at least 8 characters long'
+            }
+        
+        if new_email in ADMIN_CREDENTIALS:
+            return {
+                'success': False,
+                'error': 'An admin account with this email already exists'
+            }
+        
+        # Hash password
+        import hashlib
+        password_hash = hashlib.sha256(new_password.encode()).hexdigest()
+        
+        # Save to database
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO admin_accounts (email, name, role, password_hash, created_by)
+                VALUES (?, ?, ?, ?, ?)
+            """, (new_email, new_name, new_role, password_hash, 'OPEN_REGISTRATION'))
+            conn.commit()
+            conn.close()
+        except sqlite3.IntegrityError:
+            return {
+                'success': False,
+                'error': 'An admin account with this email already exists in database'
+            }
+        except Exception as db_err:
+            logger.error(f"Database error creating admin: {db_err}")
+            return {
+                'success': False,
+                'error': f'Database error: {str(db_err)}'
+            }
+        
+        # Add to ADMIN_CREDENTIALS (in-memory)
+        ADMIN_CREDENTIALS[new_email] = {
+            'password_hash': password_hash,
+            'name': new_name,
+            'role': new_role
+        }
+        
+        # Log the action
+        log_admin_action('SYSTEM', "OPEN_REGISTRATION", new_email, f"Registered via open endpoint: {new_name} ({new_role})")
+        
+        logger.info(f"✅ Admin registered via OPEN endpoint: {new_email} ({new_role})")
+        logger.warning("🚨 Remember to disable /admin/create-account-open endpoint after setup!")
+        
+        return {
+            'success': True,
+            'message': f'Admin account created successfully for {new_email}',
+            'admin': {
+                'email': new_email,
+                'name': new_name,
+                'role': new_role
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Open admin registration error: {e}")
         return {'success': False, 'error': str(e)}
 
 @app.get("/admin/users")
