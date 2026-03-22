@@ -17470,11 +17470,8 @@ def main():
 
 
 ADMIN_CREDENTIALS = {
-    "admin@judiq.com": {
-        "password_hash": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
-        "name": "Admin User",
-        "role": "super_admin"
-    }
+    # Populated from DB on startup via _load_db_admins()
+    # Key: email, Value: {name, role, firebase_uid, password_hash(optional)}
 }
 
 
@@ -17491,15 +17488,18 @@ def _load_db_admins():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT email, name, role, password_hash FROM admin_accounts")
+        cursor.execute("""
+            SELECT email, name, role, password_hash, firebase_uid
+            FROM admin_accounts WHERE is_active = 1 OR is_active IS NULL
+        """)
         for row in cursor.fetchall():
-            email, name, role, pw_hash = row
-            if email not in ADMIN_CREDENTIALS:
-                ADMIN_CREDENTIALS[email] = {
-                    "password_hash": pw_hash,
-                    "name": name,
-                    "role": role
-                }
+            email, name, role, pw_hash, fb_uid = row
+            ADMIN_CREDENTIALS[email] = {
+                "password_hash": pw_hash or "",
+                "name": name,
+                "role": role,
+                "firebase_uid": fb_uid or ""
+            }
         conn.close()
         loaded = len(ADMIN_CREDENTIALS)
         logger.info(f"✅ Loaded {loaded} admin account(s) into memory")
@@ -17558,35 +17558,58 @@ def init_admin_tables():
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS admin_accounts (
-                email       TEXT PRIMARY KEY,
-                name        TEXT NOT NULL,
-                role        TEXT NOT NULL DEFAULT 'admin',
-                password_hash TEXT NOT NULL,
-                created_by  TEXT,
-                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                email           TEXT PRIMARY KEY,
+                name            TEXT NOT NULL,
+                role            TEXT NOT NULL DEFAULT 'admin',
+                firebase_uid    TEXT UNIQUE,
+                password_hash   TEXT,
+                created_by      TEXT,
+                created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_login      TIMESTAMP,
+                is_active       BOOLEAN DEFAULT 1
             )
         """)
-        
-        # ENSURE default super-admin exists in database
-        cursor.execute("SELECT email FROM admin_accounts WHERE email = ?", ("admin@judiq.com",))
-        if not cursor.fetchone():
-            logger.info("🔧 Creating default super-admin in database...")
-            cursor.execute("""
-                INSERT INTO admin_accounts (email, name, role, password_hash, created_by)
-                VALUES (?, ?, ?, ?, ?)
-            """, (
-                "admin@judiq.com",
-                "Super Admin",
-                "super_admin",
-                "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",  # password = "password"
-                "SYSTEM"
-            ))
-            logger.info("✅ Default super-admin created: admin@judiq.com / password")
+        # Migrate: add columns if missing (idempotent)
+        _cols_q = cursor.execute("PRAGMA table_info(admin_accounts)").fetchall()
+        _existing = [c[1] for c in _cols_q]
+        _migrations = [
+            ("firebase_uid",  "ALTER TABLE admin_accounts ADD COLUMN firebase_uid TEXT"),
+            ("last_login",    "ALTER TABLE admin_accounts ADD COLUMN last_login TIMESTAMP"),
+            ("is_active",     "ALTER TABLE admin_accounts ADD COLUMN is_active BOOLEAN DEFAULT 1"),
+        ]
+        for col, sql in _migrations:
+            if col not in _existing:
+                try: cursor.execute(sql)
+                except Exception: pass
 
         conn.commit()
         conn.close()
         logger.info("✅ Admin tables initialized")
         _load_db_admins()
+
+        # Bootstrap: if BOOTSTRAP_ADMIN_EMAIL + BOOTSTRAP_ADMIN_FIREBASE_UID are set,
+        # ensure that account exists as super_admin (safe to run repeatedly)
+        _bs_email = os.getenv("BOOTSTRAP_ADMIN_EMAIL", "").lower().strip()
+        _bs_uid   = os.getenv("BOOTSTRAP_ADMIN_FIREBASE_UID", "").strip()
+        _bs_name  = os.getenv("BOOTSTRAP_ADMIN_NAME", "Super Admin").strip()
+        if _bs_email and _bs_uid:
+            if _bs_email not in ADMIN_CREDENTIALS:
+                try:
+                    _bc = get_db_connection(); _bcur = _bc.cursor()
+                    _bcur.execute("""
+                        INSERT OR IGNORE INTO admin_accounts
+                            (email, name, role, firebase_uid, password_hash, created_by, is_active)
+                        VALUES (?, ?, 'super_admin', ?, '', 'BOOTSTRAP', 1)
+                    """, (_bs_email, _bs_name, _bs_uid))
+                    _bc.commit(); _bc.close()
+                    ADMIN_CREDENTIALS[_bs_email] = {
+                        'name': _bs_name, 'role': 'super_admin',
+                        'firebase_uid': _bs_uid, 'password_hash': ''
+                    }
+                    logger.info(f"✅ Bootstrap super-admin created: {_bs_email}")
+                except Exception as _be:
+                    logger.warning(f"Bootstrap admin error: {_be}")
+
         return True
     except Exception as e:
         logger.error(f"❌ Error initializing admin tables: {e}")
@@ -17596,13 +17619,44 @@ def init_admin_tables():
 init_admin_tables()
 
 def verify_admin(email: str, password: str) -> bool:
-    """Verify admin credentials"""
+    """Verify admin by password hash (legacy / fallback path)."""
     import hashlib
     if email not in ADMIN_CREDENTIALS:
         return False
+    stored_hash = ADMIN_CREDENTIALS[email].get("password_hash", "")
+    if not stored_hash:
+        return False
+    return stored_hash == hashlib.sha256(password.encode()).hexdigest()
 
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
-    return ADMIN_CREDENTIALS[email]["password_hash"] == password_hash
+def verify_admin_firebase(firebase_uid: str) -> Optional[str]:
+    """
+    Verify admin by Firebase UID.
+    Returns the admin email if found, None otherwise.
+    """
+    if not firebase_uid:
+        return None
+    for email, info in ADMIN_CREDENTIALS.items():
+        if info.get("firebase_uid") == firebase_uid:
+            return email
+    return None
+
+def verify_admin_by_email_firebase(email: str, firebase_uid: str) -> bool:
+    """Verify that a Firebase UID matches the stored UID for this email."""
+    if not email or not firebase_uid:
+        return False
+    info = ADMIN_CREDENTIALS.get(email.lower().strip(), {})
+    return info.get("firebase_uid") == firebase_uid
+
+def _update_admin_last_login(email: str):
+    """Update last_login timestamp for admin in DB."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE admin_accounts SET last_login = CURRENT_TIMESTAMP WHERE email = ?", (email,))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning(f"Could not update last_login for {email}: {e}")
 
 def log_admin_action(admin_email: str, action_type: str, target_user: str = None, details: str = None):
     """Log admin actions for audit trail"""
@@ -18698,127 +18752,184 @@ def _build_complaint_draft(case_data: dict) -> dict:
 
     return {"full_text": full_text, "sections": sections}
 
+@app.post("/admin/register")
 @app.post("/admin/create-account")
 async def create_admin_account(request: Request):
     """
-    Create a new admin account.
-    Authorization options:
-      1. Firebase token (Bearer <token>) — the token's email must be an existing super_admin
-      2. Classic body: { authorizer_email, authorizer_password, new_email, new_password, new_name, role }
+    Register a new admin or super_admin account.
+
+    TWO modes:
+    ─────────────────────────────────────────────────────────────────────
+    A) Self-registration (new user creates their own account):
+       Body: { firebase_id_token, name, role }
+       The firebase_id_token is the newly created Firebase account token.
+       The email + uid come from the token — no password stored.
+
+    B) Super-admin creates another account (from dashboard):
+       Authorization: Bearer <super_admin_firebase_token>
+       Body: { new_firebase_uid, new_email, new_name, role }
+       OR with password fallback:
+       Body: { authorizer_email, authorizer_password, new_email, new_name, role, new_firebase_uid? }
+    ─────────────────────────────────────────────────────────────────────
     """
     try:
         data = await request.json()
+        auth_header = request.headers.get("Authorization", "")
 
-        # ── Resolve authorizer identity ────────────────────────────────────
-        firebase_email = get_firebase_user_email(request)
-        if firebase_email:
-            auth_email = firebase_email.lower().strip()
-            if auth_email not in ADMIN_CREDENTIALS:
-                return {'success': False, 'error': 'Firebase user is not a registered admin'}
-            if ADMIN_CREDENTIALS[auth_email].get('role') != 'super_admin':
-                return {'success': False, 'error': 'Only super_admin can create new admin accounts'}
+        # Detect mode
+        firebase_id_token_body = data.get('firebase_id_token', '')
+
+        # ── Mode A: Self-registration with own Firebase token in body ──────
+        if firebase_id_token_body and not auth_header.startswith("Bearer "):
+            decoded = verify_firebase_token(firebase_id_token_body)
+            if not decoded:
+                return {'success': False, 'error': 'Invalid Firebase token. Please sign in again.'}
+            new_uid   = decoded.get("uid", "")
+            new_email = decoded.get("email", "").lower().strip()
+            new_name  = data.get('name', decoded.get('name', '')).strip() or new_email.split('@')[0]
+            role      = data.get('role', 'admin')
+            auth_by   = 'SELF_REGISTRATION'
+
+            if new_email in ADMIN_CREDENTIALS:
+                # Already registered — just return their info
+                info = ADMIN_CREDENTIALS[new_email]
+                return {
+                    'success': True,
+                    'already_exists': True,
+                    'admin': {'email': new_email, 'name': info['name'], 'role': info['role'], 'firebase_uid': new_uid}
+                }
+
+        # ── Mode B: Super-admin registers someone else ─────────────────────
         else:
-            auth_email = data.get('authorizer_email', '').lower().strip()
-            auth_pw    = data.get('authorizer_password', '')
-            if not verify_admin(auth_email, auth_pw):
-                return {'success': False, 'error': 'Unauthorized — invalid authorizer credentials'}
-            if ADMIN_CREDENTIALS.get(auth_email, {}).get('role') != 'super_admin':
-                return {'success': False, 'error': 'Only super_admin can create new admin accounts'}
+            # Resolve authorizer
+            if auth_header.startswith("Bearer "):
+                decoded_auth = verify_firebase_token(auth_header[7:])
+                if not decoded_auth:
+                    return {'success': False, 'error': 'Invalid authorizer Firebase token'}
+                auth_uid   = decoded_auth.get("uid", "")
+                auth_email = decoded_auth.get("email", "").lower().strip()
+                matched    = verify_admin_firebase(auth_uid) or (auth_email if auth_email in ADMIN_CREDENTIALS else None)
+                if not matched:
+                    return {'success': False, 'error': 'Authorizer is not a registered admin'}
+                if ADMIN_CREDENTIALS[matched].get('role') != 'super_admin':
+                    return {'success': False, 'error': 'Only super_admin can register new admins'}
+                auth_by = matched
+            else:
+                auth_email_body = data.get('authorizer_email', '').lower().strip()
+                auth_pw_body    = data.get('authorizer_password', '')
+                if not verify_admin(auth_email_body, auth_pw_body):
+                    return {'success': False, 'error': 'Invalid authorizer credentials'}
+                if ADMIN_CREDENTIALS.get(auth_email_body, {}).get('role') != 'super_admin':
+                    return {'success': False, 'error': 'Only super_admin can register new admins'}
+                auth_by = auth_email_body
 
-        new_email  = data.get('new_email', '').strip().lower()
-        new_pw     = data.get('new_password', '')
-        new_name   = data.get('new_name', '').strip()
-        role       = data.get('role', 'admin')
+            new_uid   = data.get('new_firebase_uid', '').strip()
+            new_email = data.get('new_email', '').lower().strip()
+            new_name  = data.get('new_name', '').strip()
+            role      = data.get('role', 'admin')
 
-        if not new_email or not new_pw or not new_name:
-            return {'success': False, 'error': 'new_email, new_password, and new_name are required'}
+            if not new_email or not new_name:
+                return {'success': False, 'error': 'new_email and new_name are required'}
+            if new_email in ADMIN_CREDENTIALS:
+                return {'success': False, 'error': 'An admin account with this email already exists'}
 
-        if len(new_pw) < 8:
-            return {'success': False, 'error': 'Password must be at least 8 characters'}
+        # ── Validate role ──────────────────────────────────────────────────
+        if role not in ('admin', 'super_admin'):
+            role = 'admin'
 
-        if new_email in ADMIN_CREDENTIALS:
-            return {'success': False, 'error': 'An admin account with this email already exists'}
-
-        import hashlib as _hl
-        pw_hash = _hl.sha256(new_pw.encode()).hexdigest()
-
+        # ── Save to memory + DB ────────────────────────────────────────────
         ADMIN_CREDENTIALS[new_email] = {
-            'password_hash': pw_hash,
             'name': new_name,
-            'role': role
+            'role': role,
+            'firebase_uid': new_uid,
+            'password_hash': ''
         }
-
         try:
             _conn = get_db_connection()
-            _cur = _conn.cursor()
+            _cur  = _conn.cursor()
             _cur.execute("""
-                INSERT OR REPLACE INTO admin_accounts (email, name, role, password_hash, created_by)
-                VALUES (?, ?, ?, ?, ?)
-            """, (new_email, new_name, role, pw_hash, auth_email))
+                INSERT OR REPLACE INTO admin_accounts
+                    (email, name, role, firebase_uid, password_hash, created_by, is_active)
+                VALUES (?, ?, ?, ?, '', ?, 1)
+            """, (new_email, new_name, role, new_uid, auth_by))
             _conn.commit()
             _conn.close()
         except Exception as _db_e:
-            logger.warning(f"Could not persist admin to DB: {_db_e}")
+            logger.error(f"DB error saving admin: {_db_e}")
+            # Roll back memory
+            del ADMIN_CREDENTIALS[new_email]
+            return {'success': False, 'error': f'Database error: {_db_e}'}
 
-        log_admin_action(auth_email, 'CREATE_ADMIN', new_email,
-                         f'Created new {role} account: {new_name}')
-
-        logger.info(f'New admin account created: {new_email} (role={role}) by {auth_email}')
+        log_admin_action(auth_by, 'REGISTER_ADMIN', new_email,
+                         f'Registered {role}: {new_name} (uid={new_uid})')
+        logger.info(f"✅ Admin registered: {new_email} ({role}) by {auth_by}")
 
         return {
             'success': True,
             'message': f'Admin account created for {new_email}',
-            'admin': {'email': new_email, 'name': new_name, 'role': role}
+            'admin': {'email': new_email, 'name': new_name, 'role': role, 'firebase_uid': new_uid}
         }
 
     except Exception as e:
-        logger.error(f'Admin account creation error: {e}')
+        logger.error(f'Admin registration error: {e}')
         return {'success': False, 'error': str(e)}
 
 
 @app.post("/admin/login")
 async def admin_login(request: Request):
     """
-    Admin authentication endpoint.
-    Accepts either:
-      - { email, password }  — classic password auth
-      - Authorization: Bearer <firebase-id-token>  — Firebase token auth (email must match an admin)
+    Admin login. Accepts:
+      1. Authorization: Bearer <firebase-id-token>  →  verifies token, checks UID/email in DB
+      2. Body: { email, password }  →  legacy password fallback
+    On success returns admin profile with role.
+    Also updates last_login timestamp in DB.
     """
     try:
-        # ── Firebase token path ────────────────────────────────────────────
-        firebase_email = get_firebase_user_email(request)
-        if firebase_email:
-            email = firebase_email.lower().strip()
-            if email in ADMIN_CREDENTIALS:
-                log_admin_action(email, "LOGIN_FIREBASE", None, "Firebase token login")
-                return {
-                    'success': True,
-                    'auth_method': 'firebase',
-                    'admin': {
-                        'email': email,
-                        'name': ADMIN_CREDENTIALS[email]['name'],
-                        'role': ADMIN_CREDENTIALS[email]['role']
-                    }
+        auth_header = request.headers.get("Authorization", "")
+        # ── Path 1: Firebase token ─────────────────────────────────────────
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+            decoded = verify_firebase_token(token)
+            if not decoded:
+                return {'success': False, 'error': 'Invalid or expired Firebase token'}
+            uid   = decoded.get("uid", "")
+            email = decoded.get("email", "").lower().strip()
+            # Check by UID first (most reliable), then by email
+            matched_email = verify_admin_firebase(uid) or (email if email in ADMIN_CREDENTIALS else None)
+            if not matched_email:
+                return {'success': False, 'error': 'This Firebase account is not registered as an admin. Please register first.'}
+            info = ADMIN_CREDENTIALS[matched_email]
+            _update_admin_last_login(matched_email)
+            log_admin_action(matched_email, "LOGIN_FIREBASE", None, f"Firebase UID: {uid}")
+            return {
+                'success': True,
+                'auth_method': 'firebase',
+                'admin': {
+                    'email': matched_email,
+                    'name': info['name'],
+                    'role': info['role'],
+                    'firebase_uid': uid
                 }
-            return {'success': False, 'error': 'Firebase user is not a registered admin'}
+            }
 
-        # ── Classic password path ──────────────────────────────────────────
+        # ── Path 2: Password fallback ──────────────────────────────────────
         data = await request.json()
-        email = data.get('email', '').lower().strip()
+        email    = data.get('email', '').lower().strip()
         password = data.get('password', '')
-
         if verify_admin(email, password):
+            info = ADMIN_CREDENTIALS[email]
+            _update_admin_last_login(email)
             log_admin_action(email, "LOGIN_PASSWORD", None, "Password login")
             return {
                 'success': True,
                 'auth_method': 'password',
                 'admin': {
                     'email': email,
-                    'name': ADMIN_CREDENTIALS[email]['name'],
-                    'role': ADMIN_CREDENTIALS[email]['role']
+                    'name': info['name'],
+                    'role': info['role']
                 }
             }
-        return {'success': False, 'error': 'Invalid admin credentials'}
+        return {'success': False, 'error': 'Invalid credentials'}
     except Exception as e:
         logger.error(f"Admin login error: {e}")
         return {'success': False, 'error': str(e)}
@@ -18826,98 +18937,85 @@ async def admin_login(request: Request):
 @app.post("/admin/create-account-open")
 async def admin_create_account_open(request: Request):
     """
-    TEMPORARY: Open admin registration for initial setup.
-    If Firebase credentials are configured, the caller must supply a valid
-    Firebase ID token (Authorization: Bearer <token>) — the token email becomes
-    the creator identity.  If Firebase is not configured, no auth is required.
-    DELETE or DISABLE this endpoint after creating your first admin account!
+    Open admin registration — requires a valid Firebase ID token.
+    The Firebase account must already exist (created on frontend).
+    Stores: email, name, role, firebase_uid in DB.
+    No password stored — authentication is purely via Firebase.
     """
     try:
         data = await request.json()
+        firebase_id_token = data.get('firebase_id_token', '')
+        if not firebase_id_token:
+            # Also accept from Authorization header
+            auth_h = request.headers.get("Authorization", "")
+            if auth_h.startswith("Bearer "):
+                firebase_id_token = auth_h[7:]
 
-        # Determine creator identity
-        fb_email = get_firebase_user_email(request)
-        creator_identity = fb_email.lower().strip() if fb_email else "OPEN_REGISTRATION"
+        if not firebase_id_token:
+            return {'success': False, 'error': 'firebase_id_token is required'}
 
-        logger.warning(f"⚠️ OPEN admin registration by {creator_identity}")
+        decoded = verify_firebase_token(firebase_id_token)
+        if not decoded:
+            return {'success': False, 'error': 'Invalid or expired Firebase token. Please sign in again.'}
 
-        # New admin details
-        new_email = data.get('new_email', '').strip().lower()
-        new_name = data.get('new_name', '').strip()
-        new_password = data.get('new_password', '')
-        new_role = data.get('role', 'admin')
-        
-        # Validation
-        if not new_email or not new_name or not new_password:
-            return {
-                'success': False,
-                'error': 'Email, name, and password are required'
-            }
-        
-        if len(new_password) < 8:
-            return {
-                'success': False,
-                'error': 'Password must be at least 8 characters long'
-            }
-        
+        new_uid   = decoded.get("uid", "")
+        new_email = decoded.get("email", "").lower().strip()
+        new_name  = (data.get('name') or data.get('new_name') or decoded.get('name') or '').strip()
+        if not new_name:
+            new_name = new_email.split('@')[0]
+        role = data.get('role', 'admin')
+        if role not in ('admin', 'super_admin'):
+            role = 'admin'
+
+        if not new_email:
+            return {'success': False, 'error': 'Firebase token has no email claim'}
+
+        # If already registered, return existing account
         if new_email in ADMIN_CREDENTIALS:
+            existing = ADMIN_CREDENTIALS[new_email]
+            # Update firebase_uid if changed
+            if existing.get('firebase_uid') != new_uid and new_uid:
+                existing['firebase_uid'] = new_uid
+                try:
+                    _c = get_db_connection(); _cur = _c.cursor()
+                    _cur.execute("UPDATE admin_accounts SET firebase_uid=? WHERE email=?", (new_uid, new_email))
+                    _c.commit(); _c.close()
+                except Exception: pass
             return {
-                'success': False,
-                'error': 'An admin account with this email already exists'
+                'success': True,
+                'already_exists': True,
+                'admin': {'email': new_email, 'name': existing['name'], 'role': existing['role']}
             }
-        
-        # Hash password
-        import hashlib
-        password_hash = hashlib.sha256(new_password.encode()).hexdigest()
-        
-        # Save to database
-        try:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO admin_accounts (email, name, role, password_hash, created_by)
-                VALUES (?, ?, ?, ?, ?)
-            """, (new_email, new_name, new_role, password_hash, creator_identity))
-            conn.commit()
-            conn.close()
-        except sqlite3.IntegrityError:
-            return {
-                'success': False,
-                'error': 'An admin account with this email already exists in database'
-            }
-        except Exception as db_err:
-            logger.error(f"Database error creating admin: {db_err}")
-            return {
-                'success': False,
-                'error': f'Database error: {str(db_err)}'
-            }
-        
-        # Add to ADMIN_CREDENTIALS (in-memory)
+
         ADMIN_CREDENTIALS[new_email] = {
-            'password_hash': password_hash,
-            'name': new_name,
-            'role': new_role
+            'name': new_name, 'role': role,
+            'firebase_uid': new_uid, 'password_hash': ''
         }
-        
-        # Log the action
-        log_admin_action(creator_identity, "OPEN_REGISTRATION", new_email, f"Registered via open endpoint: {new_name} ({new_role})")
-        
-        logger.info(f"✅ Admin registered via OPEN endpoint: {new_email} ({new_role})")
-        logger.warning("🚨 Remember to disable /admin/create-account-open endpoint after setup!")
-        
+        try:
+            _conn = get_db_connection(); _cur = _conn.cursor()
+            _cur.execute("""
+                INSERT OR REPLACE INTO admin_accounts
+                    (email, name, role, firebase_uid, password_hash, created_by, is_active)
+                VALUES (?, ?, ?, ?, '', 'SELF_REGISTRATION', 1)
+            """, (new_email, new_name, role, new_uid))
+            _conn.commit(); _conn.close()
+        except Exception as db_e:
+            del ADMIN_CREDENTIALS[new_email]
+            return {'success': False, 'error': f'Database error: {db_e}'}
+
+        log_admin_action('SYSTEM', 'OPEN_REGISTRATION', new_email,
+                         f'Self-registered as {role}: {new_name} (uid={new_uid})')
+        logger.info(f"✅ Admin self-registered: {new_email} ({role})")
+
         return {
             'success': True,
-            'message': f'Admin account created successfully for {new_email}',
-            'admin': {
-                'email': new_email,
-                'name': new_name,
-                'role': new_role
-            }
+            'message': f'Admin account created for {new_email}',
+            'admin': {'email': new_email, 'name': new_name, 'role': role, 'firebase_uid': new_uid}
         }
-        
     except Exception as e:
         logger.error(f"Open admin registration error: {e}")
         return {'success': False, 'error': str(e)}
+
 
 @app.get("/admin/users")
 async def get_all_users(admin_email: str = "", request: Request = None):
@@ -19310,6 +19408,39 @@ async def get_admin_activity_log(admin_email: str = "", limit: int = 50, request
 
 
 
+
+
+@app.get("/admin/me")
+async def get_admin_me(request: Request):
+    """
+    Get current admin profile from Firebase token.
+    Authorization: Bearer <firebase-id-token>
+    """
+    try:
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return {'success': False, 'error': 'Authorization header required'}
+        decoded = verify_firebase_token(auth_header[7:])
+        if not decoded:
+            return {'success': False, 'error': 'Invalid or expired token'}
+        uid   = decoded.get("uid", "")
+        email = decoded.get("email", "").lower().strip()
+        matched = verify_admin_firebase(uid) or (email if email in ADMIN_CREDENTIALS else None)
+        if not matched:
+            return {'success': False, 'error': 'Not a registered admin', 'is_admin': False}
+        info = ADMIN_CREDENTIALS[matched]
+        return {
+            'success': True,
+            'is_admin': True,
+            'admin': {
+                'email': matched,
+                'name': info['name'],
+                'role': info['role'],
+                'firebase_uid': uid
+            }
+        }
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
 
 # ── Firebase Utility Endpoints ────────────────────────────────────────────────
 
