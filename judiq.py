@@ -14427,11 +14427,20 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
 
         if missing_fields:
             logger.error(f"❌ Missing required fields: {missing_fields}")
+            # ===== FEATURE 5: ENHANCED ERROR HANDLING =====
+            field_names = {
+                'cheque_date': 'Cheque Date',
+                'dishonour_date': 'Dishonour Date',
+                'notice_date': 'Notice Sent Date'
+            }
+            friendly_fields = [field_names.get(f, f) for f in missing_fields]
+            
             return {
                 'error': 'MISSING_REQUIRED_FIELDS',
                 'error_type': 'VALIDATION_ERROR',
                 'missing_fields': missing_fields,
                 'message': f"Required fields missing: {', '.join(missing_fields)}",
+                'user_friendly_message': f'⚠️ Insufficient Data\n\nPlease provide the following required fields to evaluate your case properly:\n\n• {chr(10).join("• " + f for f in friendly_fields)}\n\nThese dates are essential for accurate timeline compliance analysis under Section 138.',
                 'fatal_flag': True,
                 'overall_status': 'ERROR - INCOMPLETE DATA',
                 'engine_version': ENGINE_VERSION,
@@ -17872,6 +17881,26 @@ async def get_admin_analytics(admin_email: str):
         ''')
         limit_reached = [{'email': row[0], 'count': row[1]} for row in cursor.fetchall()]
         
+        # ===== FEATURE 7: ADMIN INSIGHTS - Average Score & Distribution =====
+        cursor.execute("SELECT AVG(overall_risk_score) FROM case_analyses WHERE overall_risk_score IS NOT NULL")
+        avg_score_result = cursor.fetchone()[0]
+        avg_score = round(float(avg_score_result), 1) if avg_score_result else 0
+        
+        # Score distribution
+        cursor.execute('''
+            SELECT 
+                CASE 
+                    WHEN overall_risk_score >= 70 THEN 'Strong'
+                    WHEN overall_risk_score >= 40 THEN 'Moderate'
+                    ELSE 'Weak'
+                END as category,
+                COUNT(*) as count
+            FROM case_analyses
+            WHERE overall_risk_score IS NOT NULL
+            GROUP BY category
+        ''')
+        score_distribution = {row[0]: row[1] for row in cursor.fetchall()}
+        
         conn.close()
         
         log_admin_action(admin_email, "VIEW_ANALYTICS", None, "Viewed analytics dashboard")
@@ -17884,6 +17913,8 @@ async def get_admin_analytics(admin_email: str):
                 'today_analyses': today_analyses,
                 'week_analyses': week_analyses,
                 'month_analyses': month_analyses,
+                'avg_score': avg_score,  # NEW - Feature 7
+                'score_distribution': score_distribution,  # NEW - Feature 7
                 'daily_stats': daily_stats,
                 'top_users': top_users,
                 'limit_reached_today': limit_reached
@@ -17898,6 +17929,66 @@ async def get_all_analyses(admin_email: str, limit: int = 100, offset: int = 0):
     """Get all analyses with full details"""
     if admin_email not in ADMIN_CREDENTIALS:
         raise HTTPException(status_code=403, detail="Admin access required")
+
+# ===== FEATURE 2: CASE HISTORY PER USER =====
+@app.get("/user/case-history/{user_email}")
+async def get_user_case_history(user_email: str):
+    """Get case history for specific user"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT 
+                case_id,
+                analysis_timestamp,
+                overall_risk_score,
+                compliance_level,
+                fatal_defect_override,
+                cheque_amount,
+                case_type,
+                analysis_json
+            FROM case_analyses
+            WHERE user_email = ?
+            ORDER BY analysis_timestamp DESC
+            LIMIT 50
+        ''', (user_email,))
+        
+        history = []
+        for row in cursor.fetchall():
+            # Parse JSON to get key_issue for quick preview
+            analysis_json = {}
+            key_issue = None
+            try:
+                if row[7]:
+                    analysis_json = json.loads(row[7])
+                    key_issue = analysis_json.get('key_issue') or analysis_json.get('_result', {}).get('one_line_verdict')
+            except:
+                pass
+            
+            history.append({
+                'case_id': row[0],
+                'date': row[1],
+                'score': float(row[2]) if row[2] else 0,
+                'status': row[3],
+                'is_fatal': bool(row[4]),
+                'amount': float(row[5]) if row[5] else 0,
+                'case_type': row[6],
+                'key_issue': key_issue  # For quick preview
+            })
+        
+        conn.close()
+        
+        return {
+            'success': True,
+            'history': history,
+            'total': len(history)
+        }
+    except Exception as e:
+        logger.error(f"Error getting case history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/admin/all-analyses")
     
     try:
         conn = get_db_connection()
