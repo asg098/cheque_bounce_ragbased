@@ -6,25 +6,46 @@ services:
     plan: free          # change to: starter ($7/mo) to avoid spin-down
 
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn judiq_render:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn judiq:app --host 0.0.0.0 --port $PORT
 
-    # ── Environment Variables ──────────────────────────────────
+    # ── Environment Variables ──────────────────────────────────────────────
     envVars:
-      # REQUIRED: Google Drive file ID for your cheque_bounce_kb.csv
-      # Steps:
-      #   1. Upload cheque_bounce_kb.csv to Google Drive
-      #   2. Share → "Anyone with the link" → Viewer
-      #   3. Copy the file ID from the URL:
-      #      https://drive.google.com/file/d/1btile_wGE2pjmU_gvm3ZwF-ufB246x5A/view
-      #   4. Paste it below (replace 1btile_wGE2pjmU_gvm3ZwF-ufB246x5A)
+
+      # ── Google Drive KB ───────────────────────────────────────────────────
+      # Upload cheque_bounce_kb.csv to Google Drive → Share "Anyone with link"
+      # Paste the file ID from the share URL below
       - key: GDRIVE_FILE_ID
         value: 1DfejIbgRXco3Tpp_aTBfarIm7h3t32EVykJGkEFdee4
 
-      # OPTIONAL: Google Drive API key for faster / more reliable downloads
-      # Get one free at: https://console.cloud.google.com/ → APIs → Drive API → Credentials
+      # Optional: Google Drive API key for faster/more reliable downloads
+      # Get one at: https://console.cloud.google.com/ → APIs → Drive API → Credentials
       - key: GDRIVE_API_KEY
         value: ""   # leave empty if not using
 
+      # ── Firebase Auth ─────────────────────────────────────────────────────
+      # HOW TO GET YOUR SERVICE ACCOUNT KEY:
+      #   1. Go to Firebase Console → Project Settings → Service Accounts
+      #   2. Click "Generate new private key" → download the JSON file
+      #   3. Copy the ENTIRE content of the JSON file
+      #   4. Paste it as the value of FIREBASE_SERVICE_ACCOUNT_JSON below
+      #      (Render stores it as a secret env var — safe to paste full JSON)
+      #
+      # ALTERNATIVELY, upload the JSON file to your repo (not recommended for
+      # public repos) and set FIREBASE_SERVICE_ACCOUNT_PATH to the file path.
+
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        value: ""   # REQUIRED: paste full service account JSON string here
+                    # Example: {"type":"service_account","project_id":"your-proj",...}
+
+      - key: FIREBASE_SERVICE_ACCOUNT_PATH
+        value: ""   # Alternative: absolute path to service account JSON file
+                    # Leave empty if using FIREBASE_SERVICE_ACCOUNT_JSON above
+
+      - key: FIREBASE_PROJECT_ID
+        value: ""   # Your Firebase project ID (e.g. "judiq-12345")
+                    # Find it in Firebase Console → Project Settings → General
+
+      # ── System ────────────────────────────────────────────────────────────
       # Auto-set by Render — do not change
       - key: LOG_LEVEL
         value: WARNING
