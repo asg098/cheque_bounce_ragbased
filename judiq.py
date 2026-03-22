@@ -17626,6 +17626,717 @@ async def get_user_usage_status(user_email: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _generate_case_suggestions(analysis_result: dict, case_data: dict) -> dict:
+    """
+    Derive prioritised, actionable suggestions from a completed analysis.
+    Returns { critical, high, medium, low, filing_ready, auto_draft_eligible }.
+    """
+    suggestions = {"critical": [], "high": [], "medium": [], "low": []}
+
+    mods     = analysis_result.get("modules", {})
+    timeline = mods.get("timeline_intelligence", analysis_result.get("timeline", {})) or {}
+    ingred   = mods.get("ingredient_compliance", analysis_result.get("ingredients", {})) or {}
+    doc      = mods.get("documentary_strength", analysis_result.get("documentary", {})) or {}
+    defence  = mods.get("defence_risk_analysis", analysis_result.get("defence", {})) or {}
+    risk     = mods.get("risk_assessment", analysis_result.get("risk_assessment", {})) or {}
+    proc     = mods.get("procedural_defects", analysis_result.get("procedural", {})) or {}
+    draft_c  = mods.get("drafting_compliance", analysis_result.get("drafting_compliance", {})) or {}
+
+    score        = float(analysis_result.get("final_score") or analysis_result.get("overall_score") or 0)
+    is_fatal     = bool(analysis_result.get("fatal_flag"))
+    lim_risk     = timeline.get("limitation_risk", "UNKNOWN")
+    case_type    = case_data.get("case_type", "complainant")
+
+
+    if lim_risk in ("EXPIRED", "CRITICAL"):
+        suggestions["critical"].append({
+            "id": "SG-C01",
+            "title": "Limitation Period Expired or Critical",
+            "detail": (
+                "The complaint is time-barred or within days of expiry. "
+                "A condonation application under Section 142(b) must be filed simultaneously "
+                "with strong justification. Without it the court will reject the complaint outright."
+            ),
+            "action": "File delay condonation application immediately.",
+            "section": "Section 142 NI Act"
+        })
+
+    for fd in risk.get("fatal_defects", []):
+        suggestions["critical"].append({
+            "id": "SG-C02",
+            "title": "Fatal Defect: " + str(fd.get("defect", "Unknown")),
+            "detail": str(fd.get("impact", "This defect will cause the complaint to be dismissed.")),
+            "action": str(fd.get("remedy", fd.get("cure", "Consult a lawyer immediately."))),
+            "section": str(fd.get("legal_basis", "Section 138 NI Act"))
+        })
+
+    if proc.get("fatal_defects"):
+        for _pd in proc.get("fatal_defects", []):
+            suggestions["critical"].append({
+                "id": "SG-C03",
+                "title": "Procedural Fatal Defect",
+                "detail": str(_pd.get("defect", "Procedural violation detected.")),
+                "action": str(_pd.get("remedy", "Rectify before filing.")),
+                "section": "Section 142 NI Act"
+            })
+
+
+    if not case_data.get("written_agreement_exists") and case_type == "complainant":
+        suggestions["high"].append({
+            "id": "SG-H01",
+            "title": "No Written Agreement — High Acquittal Risk",
+            "detail": (
+                "Absence of a written loan/transaction agreement allows the accused to challenge "
+                "the very existence of the legally enforceable debt. Courts regularly acquit "
+                "when complainants cannot prove the underlying liability."
+            ),
+            "action": "Gather any WhatsApp messages, emails, ledger entries, bank transfer records, or witness testimony that establishes the debt.",
+            "section": "Section 138 NI Act — legally enforceable debt requirement"
+        })
+
+    doc_score = float(doc.get("documentary_strength_score") or doc.get("compliance_score") or 0)
+    if doc_score < 60:
+        missing_docs = doc.get("missing_critical_documents", doc.get("missing_documents", []))
+        suggestions["high"].append({
+            "id": "SG-H02",
+            "title": "Documentary Strength Below Acceptable Threshold",
+            "detail": (
+                f"Documentary strength is {doc_score:.0f}/100. "
+                "Weak documentation significantly raises the risk of acquittal. "
+                + ("Missing: " + ", ".join(str(d) for d in missing_docs[:4]) + "." if missing_docs else "")
+            ),
+            "action": "Obtain original dishonour memo from bank, registered notice copy with AD card, and any transaction proof.",
+            "section": "Evidence Act + Section 138 NI Act"
+        })
+
+    service_grade = (doc.get("service_proof") or {}).get("grade", "")
+    if service_grade in ("WEAK", "VERY WEAK", "WEAK/PRESUMPTIVE"):
+        suggestions["high"].append({
+            "id": "SG-H03",
+            "title": "Notice Service Proof is Weak",
+            "detail": (
+                "The strength of proof of service of the Section 138 notice is rated " + service_grade + ". "
+                "Defence will challenge whether the accused actually received the notice, "
+                "which would invalidate the cause of action entirely."
+            ),
+            "action": "Obtain the original Acknowledgement Due (AD) card. If unavailable, track the postal article online and print the delivery confirmation.",
+            "section": "Section 27 General Clauses Act + Section 138 NI Act"
+        })
+
+    if case_data.get("is_company_case") and not case_data.get("directors_impleaded"):
+        suggestions["high"].append({
+            "id": "SG-H04",
+            "title": "Directors Not Impleaded in Company Case",
+            "detail": (
+                "When the accused is a company, Section 141 requires specific averments against "
+                "each director/officer who was responsible for the conduct of the company. "
+                "Without these averments the directors cannot be convicted and only the company "
+                "entity faces liability — making execution of any order practically impossible."
+            ),
+            "action": "Implead all responsible directors with specific averments about their role at the time of cheque issuance.",
+            "section": "Section 141 NI Act"
+        })
+
+    if case_data.get("debt_nature") == "cash" and float(case_data.get("cheque_amount", 0)) > 200000:
+        suggestions["high"].append({
+            "id": "SG-H05",
+            "title": "Cash Transaction Over ₹2 Lakh — Section 269SS Risk",
+            "detail": (
+                "Loans or deposits of ₹20,000 or more in cash are prohibited under Section 269SS "
+                "of the Income Tax Act. Defence will argue the transaction was illegal and therefore "
+                "the cheque cannot be towards a legally enforceable debt."
+            ),
+            "action": "Prepare documentary proof that the cash was a genuine business transaction. Consider whether the transaction falls within any exemption.",
+            "section": "Section 269SS Income Tax Act + Section 138 NI Act"
+        })
+
+
+    if not case_data.get("bank_dishonour_memo_available"):
+        suggestions["medium"].append({
+            "id": "SG-M01",
+            "title": "Bank Dishonour Memo Not Confirmed",
+            "detail": (
+                "The original bank return memo is a primary document that proves dishonour. "
+                "Without it, the complainant cannot prove the foundational ingredient of the offence."
+            ),
+            "action": "Obtain a certified copy of the dishonour memo / return memo from the presenting bank.",
+            "section": "Section 138 NI Act — dishonour requirement"
+        })
+
+    ingred_score = float(ingred.get("overall_score") or ingred.get("compliance_score") or 0)
+    if ingred_score < 70:
+        missing_ingr = ingred.get("missing_ingredients", [])
+        suggestions["medium"].append({
+            "id": "SG-M02",
+            "title": "Ingredient Compliance Below 70%",
+            "detail": (
+                f"Section 138 ingredient compliance is {ingred_score:.0f}/100. "
+                + ("Unmet: " + ", ".join(str(x) for x in missing_ingr[:3]) if missing_ingr else
+                   "One or more of the six mandatory ingredients is weak.")
+            ),
+            "action": "Review each of the six Section 138 ingredients (cheque validity, dishonour, legally enforceable debt, notice, 15-day period, complaint within limitation) and plug any gaps.",
+            "section": "Section 138 NI Act"
+        })
+
+    if lim_risk == "HIGH":
+        suggestions["medium"].append({
+            "id": "SG-M03",
+            "title": "Limitation Window is Closing",
+            "detail": (
+                "The complaint must be filed within one calendar month of the cause of action. "
+                "The current limitation risk is HIGH. Any delay may make the case time-barred."
+            ),
+            "action": "File the complaint immediately. Do not wait for further evidence — file and supplement.",
+            "section": "Section 142 NI Act"
+        })
+
+    defence_risks = defence.get("high_risk_defences", [])
+    if defence_risks:
+        suggestions["medium"].append({
+            "id": "SG-M04",
+            "title": f"{len(defence_risks)} High-Risk Defence(s) Identified",
+            "detail": (
+                "Accused may raise: " + "; ".join(str(d.get("ground", d.get("defence", ""))) for d in defence_risks[:3]) + ". "
+                "Prepare counter-evidence for each."
+            ),
+            "action": "Prepare affidavit-in-evidence and documentary rebuttal for each identified defence ground.",
+            "section": "Section 139 NI Act — presumption as rebuttal tool"
+        })
+
+    for gap in draft_c.get("critical_gaps", []):
+        suggestions["medium"].append({
+            "id": "SG-M05",
+            "title": "Drafting Gap: " + str(gap.get("gap", gap.get("issue", "Complaint drafting issue"))),
+            "detail": str(gap.get("explanation", "This gap may result in the complaint being challenged at the threshold stage.")),
+            "action": str(gap.get("fix", gap.get("remedy", "Ensure the complaint contains the required averment."))),
+            "section": "Section 200 CrPC + Section 138 NI Act"
+        })
+
+
+    if not case_data.get("itr_available") and float(case_data.get("cheque_amount", 0)) > 500000:
+        suggestions["low"].append({
+            "id": "SG-L01",
+            "title": "ITR Availability Unconfirmed for Large Amount",
+            "detail": (
+                "For amounts above ₹5 lakh, courts commonly probe the complainant's financial capacity "
+                "to have advanced the loan. Defence may question the source of funds."
+            ),
+            "action": "Keep ITR copies for the relevant years readily available for examination.",
+            "section": "Evidence Act — financial capacity"
+        })
+
+    if not case_data.get("case_summary") or len(str(case_data.get("case_summary", ""))) < 50:
+        suggestions["low"].append({
+            "id": "SG-L02",
+            "title": "Case Summary Not Provided",
+            "detail": "A detailed case summary helps counsel prepare examination-in-chief and anticipate cross-examination.",
+            "action": "Provide a chronological narrative of all events: transaction date, cheque issuance, dishonour, notice, and non-payment.",
+            "section": "General best practice"
+        })
+
+
+    total_count = sum(len(v) for v in suggestions.values())
+    critical_count = len(suggestions["critical"])
+    filing_ready = (not is_fatal) and score >= 75 and critical_count == 0
+
+
+    auto_draft_eligible = (
+        case_type == "complainant"
+        and not is_fatal
+        and critical_count == 0
+        and score >= 50
+    )
+
+    return {
+        "suggestions": suggestions,
+        "total_count": total_count,
+        "critical_count": critical_count,
+        "high_count": len(suggestions["high"]),
+        "medium_count": len(suggestions["medium"]),
+        "low_count": len(suggestions["low"]),
+        "filing_ready": filing_ready,
+        "auto_draft_eligible": auto_draft_eligible,
+        "score": score,
+        "overall_recommendation": (
+            "DO NOT FILE — Fatal defects present. Address critical items first." if is_fatal else
+            "READY TO FILE — No critical issues detected." if filing_ready else
+            f"NEEDS ATTENTION — {critical_count} critical and {len(suggestions['high'])} high-priority items require action before filing."
+        )
+    }
+
+
+@app.post("/suggest")
+async def suggest(request: Request):
+    """
+    Generate smart, prioritised suggestions from a completed analysis.
+
+    Accepts either:
+      (a) A full analysis result object (field: analysis)
+      (b) A case_id to look up a stored analysis from the database
+
+    Body:
+      { "analysis": <analysis_result_object>, "case_data": <original_case_data> }
+      OR
+      { "case_id": "<stored_case_id>", "user_email": "<email>" }
+
+    Returns prioritised suggestions (critical / high / medium / low),
+    a filing recommendation, and whether auto-draft is eligible.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    analysis_result = body.get("analysis")
+    case_data       = body.get("case_data", {})
+    case_id         = body.get("case_id", "")
+
+    if not analysis_result and case_id:
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT analysis_json, case_type, cheque_amount FROM case_analyses WHERE case_id = ?",
+                (case_id,)
+            )
+            row = cursor.fetchone()
+            conn.close()
+            if not row:
+                raise HTTPException(status_code=404, detail=f"case_id '{case_id}' not found")
+            analysis_result = json.loads(row[0]) if row[0] else {}
+            if not case_data:
+                case_data = analysis_result.get("case_metadata", {})
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"DB fetch for suggestions failed: {e}")
+            raise HTTPException(status_code=500, detail="Failed to retrieve analysis from database")
+
+    if not analysis_result:
+        raise HTTPException(status_code=400, detail="Provide either 'analysis' object or 'case_id'")
+
+    try:
+        result = _generate_case_suggestions(analysis_result, case_data)
+    except Exception as e:
+        logger.error(f"Suggestion generation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Suggestion engine error: {str(e)}")
+
+    return {
+        "success": True,
+        "case_id": case_id or analysis_result.get("case_id", ""),
+        **result
+    }
+
+
+@app.post("/auto-draft")
+async def auto_draft(request: Request):
+    """
+    Analyse case data, generate smart suggestions, and immediately produce
+    a tailored Section 138 complaint draft — all in one call.
+
+    Daily limit: 3 drafts per user (shared with /generate-draft).
+
+    Body:
+      {
+        "user_email":  "lawyer@example.com",
+        "case_data":   { <full CaseAnalysisRequest fields> },
+        "case_id":     "<optional — links to existing analysis>",
+        "analysis":    <optional — pre-computed analysis result>
+      }
+
+    Returns:
+      - suggestions:  prioritised suggestions from the analysis
+      - draft_text:   complete Section 138 complaint text
+      - sections:     structured dict of complaint sections
+      - warnings:     suggestions that should be resolved BEFORE filing
+      - usage:        { used, limit, remaining, exhausted }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    user_email      = body.get("user_email", "")
+    case_data       = body.get("case_data", {})
+    case_id         = body.get("case_id", "")
+    analysis_result = body.get("analysis")
+    draft_type      = "auto_draft"
+
+
+    if user_email:
+        is_allowed, used_today = check_draft_limit(user_email)
+        if not is_allowed:
+            return {
+                "success": False,
+                "error": "DRAFT_LIMIT_REACHED",
+                "error_type": "RATE_LIMIT",
+                "message": (
+                    f"Daily draft limit of 3 reached. "
+                    f"You have generated {used_today}/3 drafts today. "
+                    "Please try again tomorrow."
+                ),
+                "usage": {
+                    "used": used_today,
+                    "limit": 3,
+                    "remaining": 0,
+                    "exhausted": True
+                },
+                "next_reset": (date.today() + timedelta(days=1)).isoformat() + "T00:00:00"
+            }
+    else:
+        used_today = 0
+
+
+    if not analysis_result and case_id:
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT analysis_json FROM case_analyses WHERE case_id = ?",
+                (case_id,)
+            )
+            row = cursor.fetchone()
+            conn.close()
+            if row and row[0]:
+                analysis_result = json.loads(row[0])
+                if not case_data:
+                    case_data = analysis_result.get("case_metadata", {})
+        except Exception as e:
+            logger.warning(f"Could not load stored analysis for auto-draft: {e}")
+
+
+    suggestion_data = {}
+    if analysis_result:
+        try:
+            suggestion_data = _generate_case_suggestions(analysis_result, case_data)
+        except Exception as e:
+            logger.warning(f"Suggestion step failed in auto-draft: {e}")
+            suggestion_data = {}
+
+
+    warnings = []
+    if suggestion_data:
+        warnings.extend(suggestion_data.get("suggestions", {}).get("critical", []))
+        warnings.extend(suggestion_data.get("suggestions", {}).get("high", []))
+
+
+    if suggestion_data and not suggestion_data.get("auto_draft_eligible", True):
+        critical_count = suggestion_data.get("critical_count", 0)
+        return {
+            "success": False,
+            "error": "DRAFT_NOT_ELIGIBLE",
+            "error_type": "CASE_INELIGIBLE",
+            "message": (
+                f"Auto-draft is blocked because {critical_count} fatal/critical issue(s) were detected. "
+                "A complaint filed in this state will likely be rejected. "
+                "Address the critical issues first, then request the draft."
+            ),
+            "suggestions": suggestion_data.get("suggestions", {}),
+            "critical_count": critical_count,
+            "overall_recommendation": suggestion_data.get("overall_recommendation", ""),
+            "resolve_first": suggestion_data.get("suggestions", {}).get("critical", [])
+        }
+
+
+    if analysis_result:
+        _mods = analysis_result.get("modules", {})
+
+
+        _tl = _mods.get("timeline_intelligence", analysis_result.get("timeline", {})) or {}
+        _dates = _tl.get("dates", _tl.get("critical_dates", {})) or {}
+        for _fld in ("cheque_date", "dishonour_date", "notice_date", "complaint_filed_date"):
+            if not case_data.get(_fld) and _dates.get(_fld):
+                case_data[_fld] = _dates[_fld]
+
+
+        _coa = _tl.get("cause_of_action_date") or _tl.get("cause_of_action", {})
+        if isinstance(_coa, str):
+            case_data["cause_of_action_date"] = _coa
+        elif isinstance(_coa, dict):
+            case_data["cause_of_action_date"] = _coa.get("date", "")
+
+
+        _jur = _mods.get("territorial_jurisdiction", analysis_result.get("jurisdiction", {})) or {}
+        if not case_data.get("jurisdiction") and _jur.get("recommended_jurisdiction"):
+            case_data["jurisdiction"] = _jur["recommended_jurisdiction"]
+
+
+    try:
+        draft = _build_enhanced_complaint_draft(case_data, suggestion_data)
+    except Exception as e:
+        logger.error(f"Auto-draft build error: {e}")
+        raise HTTPException(status_code=500, detail=f"Draft generation failed: {str(e)}")
+
+
+    if user_email:
+        log_draft_usage(user_email, case_id=case_id, draft_type=draft_type)
+        used_today += 1
+
+    remaining = max(0, 3 - used_today)
+
+    return {
+        "success": True,
+        "draft_type": "auto_draft",
+        "case_id": case_id or (analysis_result or {}).get("case_id") or "",
+        "draft_text": draft["full_text"],
+        "sections": draft["sections"],
+        "word_count": len(draft["full_text"].split()),
+        "suggestions": suggestion_data.get("suggestions", {}),
+        "filing_ready": suggestion_data.get("filing_ready", False),
+        "overall_recommendation": suggestion_data.get("overall_recommendation", ""),
+        "warnings": warnings,
+        "warning_count": len(warnings),
+        "usage": {
+            "used": used_today,
+            "limit": 3,
+            "remaining": remaining,
+            "exhausted": remaining == 0
+        },
+        "next_reset": (date.today() + timedelta(days=1)).isoformat() + "T00:00:00",
+        "disclaimer": (
+            "This draft is AI-generated for reference only. "
+            "Always review with qualified legal counsel before filing. "
+            "Address all warnings (if any) before submitting to court."
+        )
+    }
+
+
+def _build_enhanced_complaint_draft(case_data: dict, suggestion_data: dict) -> dict:
+    """
+    Build an enhanced, suggestion-aware Section 138 NI Act complaint draft.
+    Inserts additional paragraphs when analysis flags specific risks.
+    Returns { full_text: str, sections: dict }.
+    """
+    complainant   = case_data.get("complainant_name", "[COMPLAINANT NAME]")
+    accused       = case_data.get("accused_name", "[ACCUSED NAME]")
+    court         = case_data.get("court_name", "the Hon'ble Court")
+    cheque_no     = case_data.get("cheque_number", "[CHEQUE NO]")
+    bank          = case_data.get("bank_name", "[BANK NAME]")
+    cheque_date   = case_data.get("cheque_date", "[CHEQUE DATE]")
+    amount        = case_data.get("cheque_amount", 0)
+    dis_date      = case_data.get("dishonour_date", "[DISHONOUR DATE]")
+    dis_reason    = case_data.get("dishonour_reason", "Insufficient Funds")
+    notice_date   = case_data.get("notice_date", "[NOTICE DATE]")
+    notice_served = case_data.get("notice_service_date", notice_date)
+    complaint_dt  = case_data.get("complaint_filed_date", date.today().isoformat())
+    debt_nature   = case_data.get("debt_nature", "legally enforceable debt")
+    jurisdiction  = case_data.get("jurisdiction", "[JURISDICTION]")
+    trans_date    = case_data.get("transaction_date", "")
+    coa_date      = case_data.get("cause_of_action_date", "")
+    is_company    = case_data.get("is_company_case", False)
+    directors     = case_data.get("directors_impleaded", False)
+    has_agreement = case_data.get("written_agreement_exists", False)
+    debt_nat_raw  = case_data.get("debt_nature", "loan")
+
+    amt_fmt  = "\u20b9{:,.2f}".format(float(amount)) if amount else "[AMOUNT]"
+    amt_2x   = "\u20b9{:,.2f}".format(float(amount) * 2) if amount else "[AMOUNT x2]"
+    year     = date.today().year
+
+    sug_all  = suggestion_data.get("suggestions", {}) if suggestion_data else {}
+    critical = sug_all.get("critical", [])
+    high     = sug_all.get("high", [])
+
+    sections = {}
+
+
+    sections["heading"] = (
+        "IN THE COURT OF " + court.upper() + "\n\n"
+        "COMPLAINT CASE NO. __________ / " + str(year) + "\n\n"
+        "COMPLAINANT:\n"
+        "    " + complainant + "\n\n"
+        "ACCUSED:\n"
+        "    " + accused + "\n\n"
+        "COMPLAINT UNDER SECTIONS 138"
+        + (", 141" if is_company else "")
+        + ", 142 OF THE NEGOTIABLE INSTRUMENTS ACT, 1881\n"
+        "READ WITH SECTION 200 OF THE CODE OF CRIMINAL PROCEDURE, 1973\n"
+    )
+
+
+    para_num = [1]
+
+    def p(text):
+        n = para_num[0]
+        para_num[0] += 1
+        return str(n) + ". " + text + "\n\n"
+
+    facts = ""
+    if trans_date:
+        facts += p(
+            "That on " + trans_date + ", the Accused approached the Complainant and "
+            "borrowed a sum of " + amt_fmt + " as a " + str(debt_nat_raw) + ". "
+            "The Complainant, having the financial capacity to advance the said sum, "
+            "duly paid the same to the Accused."
+            + (" The said transaction is evidenced by a written agreement / acknowledgement executed by the Accused." if has_agreement else "")
+        )
+    else:
+        facts += p(
+            "That the Accused was and is indebted to the Complainant in a sum of "
+            + amt_fmt + " towards " + debt_nature + "."
+        )
+
+    facts += p(
+        "That in discharge of the said legally enforceable liability and debt, "
+        "the Accused issued Cheque No. " + cheque_no + " dated " + cheque_date
+        + " drawn on " + bank + " for an amount of " + amt_fmt
+        + " in favour of the Complainant. "
+        "The said cheque was issued towards discharge of a legally enforceable debt "
+        "and liability of the Accused towards the Complainant."
+    )
+
+    facts += p(
+        "That the Complainant duly presented the said cheque for encashment through "
+        "his banker in the normal course of banking operations. The cheque was "
+        "returned/dishonoured by the drawee bank on " + dis_date
+        + " vide a return memo bearing the reason \"" + dis_reason + "\". "
+        "The said dishonour memo is in the possession of the Complainant and is "
+        "produced as Exhibit A."
+    )
+
+
+    facts += p(
+        "That upon dishonour of the said cheque, the Complainant caused a legal "
+        "notice under Section 138 of the Negotiable Instruments Act, 1881 to be "
+        "served upon the Accused by registered post with Acknowledgement Due on "
+        + notice_date + ", demanding payment of " + amt_fmt
+        + " within a period of fifteen (15) days from the date of receipt of the notice."
+    )
+
+    facts += p(
+        "That the said statutory notice was duly served upon the Accused"
+        + (" on " + notice_served if notice_served and notice_served != notice_date else "")
+        + ". Despite receipt of the said notice and expiry of the fifteen (15) day "
+        "period stipulated therein, the Accused has failed, neglected, and refused "
+        "to pay the said amount of " + amt_fmt + " or any part thereof to the Complainant. "
+        + ("The cause of action for the present complaint arose on " + coa_date + "." if coa_date else "")
+    )
+
+    sections["facts"] = facts.strip()
+
+
+    s141_text = ""
+    if is_company:
+        s141_text += p(
+            "That the Accused is a company incorporated under the Companies Act and "
+            "the cheque in question was issued by the company through its authorised "
+            "signatory. By virtue of Section 141 of the Negotiable Instruments Act, 1881, "
+            "every person who at the time the offence was committed was in charge of, "
+            "and was responsible to the company for the conduct of its business, "
+            "shall be deemed to be guilty of the offence."
+        )
+        if directors:
+            s141_text += p(
+                "That the directors/officers responsible for the day-to-day affairs of "
+                "the Accused-company are being impleaded herein with specific averments "
+                "regarding their role and responsibility in the issuance of the dishonoured cheque."
+            )
+
+    sections["section_141"] = s141_text.strip() if s141_text else ""
+
+
+    averments = ""
+    averments += p(
+        "That the cheque in question represents a legally enforceable debt and "
+        "liability of the Accused towards the Complainant. The presumption under "
+        "Section 139 of the Negotiable Instruments Act, 1881 squarely applies, "
+        "and the burden is upon the Accused to rebut the said presumption."
+    )
+
+    averments += p(
+        "That all the ingredients of the offence punishable under Section 138 of "
+        "the Negotiable Instruments Act, 1881 are satisfied in the present case:\n"
+        "   (i)   A cheque was drawn on a bank account for payment of a sum of money;\n"
+        "   (ii)  The cheque was issued towards discharge of a legally enforceable debt;\n"
+        "   (iii) The cheque was presented within three months of its date;\n"
+        "   (iv)  The cheque was returned by the drawee bank unpaid;\n"
+        "   (v)   A demand notice was served upon the Accused within 30 days of dishonour;\n"
+        "   (vi)  The Accused failed to pay within 15 days of receiving the notice."
+    )
+
+    averments += p(
+        "That the present complaint is being filed within the period of limitation "
+        "prescribed under Section 142 of the Negotiable Instruments Act, 1881, "
+        "i.e., within one month from the date the cause of action arose."
+    )
+
+    averments += p(
+        "That this Hon'ble Court has jurisdiction to try the present complaint as "
+        "the cheque was delivered for collection / presented for payment within "
+        "the territorial jurisdiction of this Court in " + jurisdiction + "."
+    )
+
+
+    sugs_ids = [s.get("id", "") for s in critical + high]
+    if "SG-H01" in sugs_ids or case_data.get("security_cheque_alleged"):
+        averments += p(
+            "That the Complainant specifically avers and states that the cheque in "
+            "question was NOT issued as a security cheque but was issued towards "
+            "discharge of a definite, crystallised, and legally enforceable liability "
+            "of the Accused towards the Complainant as of the date of issuance."
+        )
+
+    sections["averments"] = averments.strip()
+
+
+    sections["relief"] = (
+        "In view of the foregoing facts and circumstances, it is most respectfully "
+        "prayed that this Hon'ble Court may be pleased to:\n\n"
+        "   (a) Take cognizance of the offence punishable under Section 138"
+        + (", 141" if is_company else "")
+        + " of the Negotiable Instruments Act, 1881;\n\n"
+        "   (b) Issue process (summons) against the Accused and direct the "
+        "Accused to appear before this Hon'ble Court;\n\n"
+        "   (c) Upon trial, convict the Accused and sentence them to imprisonment "
+        "for a term which may extend to two years and/or fine which shall not be "
+        "less than the cheque amount i.e. " + amt_fmt + " and may extend to twice "
+        "the cheque amount i.e. " + amt_2x + ";\n\n"
+        "   (d) Direct the Accused to pay compensation of " + amt_fmt + " to the "
+        "Complainant under Section 357 of the Code of Criminal Procedure, 1973;\n\n"
+        "   (e) Grant interim compensation under Section 143A of the Negotiable "
+        "Instruments Act, 1881 pending trial;\n\n"
+        "   (f) Pass such other and further orders as this Hon'ble Court may deem "
+        "fit and proper in the interests of justice.\n"
+    )
+
+
+    sections["documents"] = (
+        "LIST OF DOCUMENTS\n\n"
+        "Exhibit A: Original dishonoured cheque and bank return memo.\n"
+        "Exhibit B: Copy of legal notice dated " + notice_date + ".\n"
+        "Exhibit C: Postal receipts and acknowledgement due (AD) card evidencing service.\n"
+        + ("Exhibit D: Written agreement / acknowledgement of debt.\n" if has_agreement else "")
+        + "Exhibit E: Bank statement of Complainant evidencing transaction.\n"
+    )
+
+
+    sections["verification"] = (
+        "VERIFICATION\n\n"
+        "I, " + complainant + ", the Complainant above named, do hereby solemnly verify "
+        "and declare that the contents of the above complaint are true and correct to "
+        "the best of my knowledge, information, and belief. Nothing material has been "
+        "concealed or misrepresented herein.\n\n"
+        "Verified at __________ on " + complaint_dt + ".\n\n"
+        "                                          COMPLAINANT\n"
+        "                                     (" + complainant + ")\n\n"
+        "Through Counsel:\n"
+        "Advocate: __________________________\n"
+        "Bar No.:  __________________________\n"
+        "Address:  __________________________\n"
+    )
+
+
+    full_text = sections["heading"] + "\n"
+    full_text += "FACTS OF THE CASE\n\n" + sections["facts"] + "\n\n"
+    if sections["section_141"]:
+        full_text += "AVERMENTS UNDER SECTION 141 NI ACT\n\n" + sections["section_141"] + "\n\n"
+    full_text += "LEGAL AVERMENTS\n\n" + sections["averments"] + "\n\n"
+    full_text += "PRAYER\n\n" + sections["relief"] + "\n"
+    full_text += sections["documents"] + "\n"
+    full_text += sections["verification"]
+
+    return {"full_text": full_text, "sections": sections}
+
+
 @app.post("/generate-draft")
 async def generate_draft(request: Request):
     """
