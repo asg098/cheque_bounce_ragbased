@@ -17539,6 +17539,458 @@ def main():
     port = CONFIG["PORT"]
     uvicorn.run(app, host=CONFIG["HOST"], port=port, log_level="info")
 
+# ============================================================================
+# ADMIN SYSTEM - User Management, Limit Allocation, Analytics
+# ============================================================================
+
+# Admin credentials (in production, use environment variables)
+ADMIN_CREDENTIALS = {
+    "admin@judiq.com": {
+        "password_hash": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",  # "password" hashed
+        "name": "Admin User",
+        "role": "super_admin"
+    }
+}
+
+# User limits table (stores custom limits per user)
+def init_admin_tables():
+    """Initialize admin-related database tables"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # User limits table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_limits (
+                user_email TEXT PRIMARY KEY,
+                daily_limit INTEGER DEFAULT 3,
+                is_unlimited BOOLEAN DEFAULT 0,
+                custom_limit_reason TEXT,
+                set_by_admin TEXT,
+                set_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Admin activity log
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS admin_activity_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                admin_email TEXT,
+                action_type TEXT,
+                target_user TEXT,
+                action_details TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+        logger.info("✅ Admin tables initialized")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Error initializing admin tables: {e}")
+        return False
+
+# Initialize on startup
+init_admin_tables()
+
+def verify_admin(email: str, password: str) -> bool:
+    """Verify admin credentials"""
+    import hashlib
+    if email not in ADMIN_CREDENTIALS:
+        return False
+    
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
+    return ADMIN_CREDENTIALS[email]["password_hash"] == password_hash
+
+def log_admin_action(admin_email: str, action_type: str, target_user: str = None, details: str = None):
+    """Log admin actions for audit trail"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO admin_activity_log (admin_email, action_type, target_user, action_details)
+            VALUES (?, ?, ?, ?)
+        ''', (admin_email, action_type, target_user, details))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Error logging admin action: {e}")
+
+def get_user_limit(user_email: str) -> int:
+    """Get custom limit for user, or default 3"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT daily_limit, is_unlimited 
+            FROM user_limits 
+            WHERE user_email = ?
+        ''', (user_email,))
+        result = cursor.fetchone()
+        conn.close()
+        
+        if result:
+            is_unlimited = result[1]
+            if is_unlimited:
+                return 999999  # Unlimited
+            return result[0]
+        return 3  # Default
+    except Exception as e:
+        logger.error(f"Error getting user limit: {e}")
+        return 3
+
+# Update check_daily_limit to use custom limits
+def check_daily_limit(user_email: str) -> Tuple[bool, int]:
+    """
+    Check if user has exceeded daily analysis limit.
+    Now supports custom limits per user.
+    """
+    if not user_email or not isinstance(user_email, str):
+        return True, 0
+    
+    today = date.today().isoformat()
+    DAILY_LIMIT = get_user_limit(user_email)  # Get custom or default limit
+    
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT COUNT(*) FROM case_analyses 
+            WHERE user_email = ? 
+            AND DATE(analysis_timestamp) = ?
+        ''', (user_email, today))
+        
+        count = cursor.fetchone()[0]
+        conn.close()
+        
+        logger.info(f"📊 Daily limit check for {user_email}: {count}/{DAILY_LIMIT} used today")
+        
+        return count < DAILY_LIMIT, count
+        
+    except Exception as e:
+        logger.error(f"❌ Error checking daily limit: {e}")
+        return True, 0
+
+# ===== ADMIN API ENDPOINTS =====
+
+@app.post("/admin/login")
+async def admin_login(request: Request):
+    """Admin authentication endpoint"""
+    try:
+        data = await request.json()
+        email = data.get('email', '')
+        password = data.get('password', '')
+        
+        if verify_admin(email, password):
+            log_admin_action(email, "LOGIN", None, "Successful admin login")
+            return {
+                'success': True,
+                'admin': {
+                    'email': email,
+                    'name': ADMIN_CREDENTIALS[email]['name'],
+                    'role': ADMIN_CREDENTIALS[email]['role']
+                }
+            }
+        else:
+            return {
+                'success': False,
+                'error': 'Invalid admin credentials'
+            }
+    except Exception as e:
+        logger.error(f"Admin login error: {e}")
+        return {'success': False, 'error': str(e)}
+
+@app.get("/admin/users")
+async def get_all_users(admin_email: str):
+    """Get all users with their usage stats"""
+    if admin_email not in ADMIN_CREDENTIALS:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get all users with their analysis counts
+        cursor.execute('''
+            SELECT 
+                user_email,
+                COUNT(*) as total_analyses,
+                MAX(analysis_timestamp) as last_analysis,
+                MIN(analysis_timestamp) as first_analysis
+            FROM case_analyses
+            WHERE user_email IS NOT NULL AND user_email != ''
+            GROUP BY user_email
+            ORDER BY total_analyses DESC
+        ''')
+        
+        users = []
+        for row in cursor.fetchall():
+            user_email = row[0]
+            
+            # Get today's usage
+            cursor.execute('''
+                SELECT COUNT(*) FROM case_analyses
+                WHERE user_email = ? AND DATE(analysis_timestamp) = DATE('now')
+            ''', (user_email,))
+            today_count = cursor.fetchone()[0]
+            
+            # Get custom limit if exists
+            cursor.execute('''
+                SELECT daily_limit, is_unlimited, custom_limit_reason
+                FROM user_limits WHERE user_email = ?
+            ''', (user_email,))
+            limit_info = cursor.fetchone()
+            
+            users.append({
+                'email': user_email,
+                'total_analyses': row[1],
+                'last_analysis': row[2],
+                'first_analysis': row[3],
+                'today_usage': today_count,
+                'daily_limit': limit_info[0] if limit_info else 3,
+                'is_unlimited': bool(limit_info[1]) if limit_info else False,
+                'limit_reason': limit_info[2] if limit_info else None
+            })
+        
+        conn.close()
+        
+        log_admin_action(admin_email, "VIEW_USERS", None, f"Viewed {len(users)} users")
+        
+        return {
+            'success': True,
+            'users': users,
+            'total_users': len(users)
+        }
+    except Exception as e:
+        logger.error(f"Error getting users: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/admin/set-user-limit")
+async def set_user_limit(request: Request):
+    """Set custom daily limit for a user"""
+    try:
+        data = await request.json()
+        admin_email = data.get('admin_email')
+        user_email = data.get('user_email')
+        daily_limit = data.get('daily_limit', 3)
+        is_unlimited = data.get('is_unlimited', False)
+        reason = data.get('reason', '')
+        
+        if admin_email not in ADMIN_CREDENTIALS:
+            raise HTTPException(status_code=403, detail="Admin access required")
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Insert or update user limit
+        cursor.execute('''
+            INSERT INTO user_limits (user_email, daily_limit, is_unlimited, custom_limit_reason, set_by_admin)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(user_email) DO UPDATE SET
+                daily_limit = excluded.daily_limit,
+                is_unlimited = excluded.is_unlimited,
+                custom_limit_reason = excluded.custom_limit_reason,
+                set_by_admin = excluded.set_by_admin,
+                updated_at = CURRENT_TIMESTAMP
+        ''', (user_email, daily_limit, 1 if is_unlimited else 0, reason, admin_email))
+        
+        conn.commit()
+        conn.close()
+        
+        limit_text = "UNLIMITED" if is_unlimited else f"{daily_limit}/day"
+        log_admin_action(admin_email, "SET_LIMIT", user_email, f"Set limit to {limit_text}: {reason}")
+        
+        return {
+            'success': True,
+            'message': f"Limit set to {limit_text} for {user_email}"
+        }
+    except Exception as e:
+        logger.error(f"Error setting user limit: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/admin/analytics")
+async def get_admin_analytics(admin_email: str):
+    """Get comprehensive analytics for admin dashboard"""
+    if admin_email not in ADMIN_CREDENTIALS:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Total analyses
+        cursor.execute("SELECT COUNT(*) FROM case_analyses")
+        total_analyses = cursor.fetchone()[0]
+        
+        # Total users
+        cursor.execute("SELECT COUNT(DISTINCT user_email) FROM case_analyses WHERE user_email IS NOT NULL")
+        total_users = cursor.fetchone()[0]
+        
+        # Today's analyses
+        cursor.execute("SELECT COUNT(*) FROM case_analyses WHERE DATE(analysis_timestamp) = DATE('now')")
+        today_analyses = cursor.fetchone()[0]
+        
+        # This week's analyses
+        cursor.execute("SELECT COUNT(*) FROM case_analyses WHERE DATE(analysis_timestamp) >= DATE('now', '-7 days')")
+        week_analyses = cursor.fetchone()[0]
+        
+        # This month's analyses
+        cursor.execute("SELECT COUNT(*) FROM case_analyses WHERE DATE(analysis_timestamp) >= DATE('now', '-30 days')")
+        month_analyses = cursor.fetchone()[0]
+        
+        # Daily breakdown (last 30 days)
+        cursor.execute('''
+            SELECT DATE(analysis_timestamp) as date, COUNT(*) as count
+            FROM case_analyses
+            WHERE DATE(analysis_timestamp) >= DATE('now', '-30 days')
+            GROUP BY DATE(analysis_timestamp)
+            ORDER BY date DESC
+        ''')
+        daily_stats = [{'date': row[0], 'count': row[1]} for row in cursor.fetchall()]
+        
+        # Top users
+        cursor.execute('''
+            SELECT user_email, COUNT(*) as count
+            FROM case_analyses
+            WHERE user_email IS NOT NULL
+            GROUP BY user_email
+            ORDER BY count DESC
+            LIMIT 10
+        ''')
+        top_users = [{'email': row[0], 'count': row[1]} for row in cursor.fetchall()]
+        
+        # Users who hit limit today
+        cursor.execute('''
+            SELECT user_email, COUNT(*) as count
+            FROM case_analyses
+            WHERE DATE(analysis_timestamp) = DATE('now')
+            GROUP BY user_email
+            HAVING count >= 3
+        ''')
+        limit_reached = [{'email': row[0], 'count': row[1]} for row in cursor.fetchall()]
+        
+        conn.close()
+        
+        log_admin_action(admin_email, "VIEW_ANALYTICS", None, "Viewed analytics dashboard")
+        
+        return {
+            'success': True,
+            'analytics': {
+                'total_analyses': total_analyses,
+                'total_users': total_users,
+                'today_analyses': today_analyses,
+                'week_analyses': week_analyses,
+                'month_analyses': month_analyses,
+                'daily_stats': daily_stats,
+                'top_users': top_users,
+                'limit_reached_today': limit_reached
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error getting analytics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/admin/all-analyses")
+async def get_all_analyses(admin_email: str, limit: int = 100, offset: int = 0):
+    """Get all analyses with full details"""
+    if admin_email not in ADMIN_CREDENTIALS:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT 
+                case_id,
+                analysis_timestamp,
+                user_email,
+                case_type,
+                cheque_amount,
+                overall_risk_score,
+                compliance_level,
+                fatal_defect_override,
+                analysis_json
+            FROM case_analyses
+            ORDER BY analysis_timestamp DESC
+            LIMIT ? OFFSET ?
+        ''', (limit, offset))
+        
+        analyses = []
+        for row in cursor.fetchall():
+            analysis_json = json.loads(row[8]) if row[8] else {}
+            analyses.append({
+                'case_id': row[0],
+                'timestamp': row[1],
+                'user_email': row[2],
+                'case_type': row[3],
+                'cheque_amount': row[4],
+                'score': row[5],
+                'compliance_level': row[6],
+                'is_fatal': bool(row[7]),
+                'full_analysis': analysis_json
+            })
+        
+        # Get total count
+        cursor.execute("SELECT COUNT(*) FROM case_analyses")
+        total_count = cursor.fetchone()[0]
+        
+        conn.close()
+        
+        log_admin_action(admin_email, "VIEW_ALL_ANALYSES", None, f"Viewed {len(analyses)} analyses (offset {offset})")
+        
+        return {
+            'success': True,
+            'analyses': analyses,
+            'total_count': total_count,
+            'limit': limit,
+            'offset': offset
+        }
+    except Exception as e:
+        logger.error(f"Error getting all analyses: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/admin/activity-log")
+async def get_admin_activity_log(admin_email: str, limit: int = 50):
+    """Get admin activity log"""
+    if admin_email not in ADMIN_CREDENTIALS:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT admin_email, action_type, target_user, action_details, timestamp
+            FROM admin_activity_log
+            ORDER BY timestamp DESC
+            LIMIT ?
+        ''', (limit,))
+        
+        activities = []
+        for row in cursor.fetchall():
+            activities.append({
+                'admin': row[0],
+                'action': row[1],
+                'target': row[2],
+                'details': row[3],
+                'timestamp': row[4]
+            })
+        
+        conn.close()
+        
+        return {
+            'success': True,
+            'activities': activities
+        }
+    except Exception as e:
+        logger.error(f"Error getting activity log: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     main()
 
