@@ -8453,6 +8453,24 @@ def generate_executive_summary(
     )
 
     _primary_issue = unique_fatals[0].get('defect', '') if unique_fatals else ''
+    
+    # FIX 1: Ensure primary_issue is NEVER empty or generic
+    if not _primary_issue or _primary_issue.strip() == '':
+        # Extract from weaknesses or filing reasons
+        if not case_data.get('written_agreement_exists') and not case_data.get('ledger_available'):
+            _primary_issue = "Lack of documentary proof of legally enforceable debt"
+        elif not case_data.get('written_agreement_exists'):
+            _primary_issue = "Absence of written agreement evidencing the debt"
+        elif not case_data.get('ledger_available'):
+            _primary_issue = "Missing financial records establishing transaction trail"
+        elif not case_data.get('postal_proof_available'):
+            _primary_issue = "Unverified notice delivery - postal proof missing"
+        elif not case_data.get('original_cheque_available'):
+            _primary_issue = "Original cheque unavailable"
+        elif score < 55:
+            _primary_issue = "Multiple evidentiary and compliance gaps identified"
+        else:
+            _primary_issue = "Minor evidentiary gaps requiring attention"
     _refilin_w     = timeline_data.get('refiling_window') or {}
     _refile_days   = _refilin_w.get('days_remaining', 0)
     _refile_dl     = _refilin_w.get('deadline_date', '')
@@ -17150,7 +17168,7 @@ async def analyze_case(request: CaseAnalysisRequest, http_request: Request = Non
             "success": True,
 
 
-            "final_score": round(_canon_score, 1),
+            "final_score": round(_canon_score),  # FIX 2: Consistent integer rounding (63 not 62.8)
             "status": _clean_status,
             "summary": _top_summary,
             "documentary_strength": _doc_context,
