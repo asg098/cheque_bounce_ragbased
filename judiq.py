@@ -37,9 +37,11 @@ def indian_number_format(amount: float) -> str:
     else:
         result = s[-3:]
         s = s[:-3]
-        while s:
+        while len(s) > 2:
             result = s[-2:] + ',' + result
             s = s[:-2]
+        if s:
+            result = s + ',' + result
 
     paise = round((amount % 1) * 100)
     if paise:
@@ -453,7 +455,8 @@ def save_court_statistics_to_db(court_stats: Dict):
     if not court_stats:
         return
     try:
-        conn = sqlite3.connect(analytics_db_path)
+        _db_path = globals().get('analytics_db_path') or Path('judiq.db')
+        conn = sqlite3.connect(_db_path)
         cursor = conn.cursor()
         for court_name, stats in court_stats.items():
             cursor.execute("""
@@ -721,6 +724,8 @@ def safe_analysis(func):
     """
     Decorator to add error handling to analysis functions.
     """
+    import functools
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         try:
             return func(*args, **kwargs)
@@ -18976,6 +18981,29 @@ async def admin_create_account(request: Request):
         new_password = data.get('new_password', '')
         new_role = data.get('role', 'admin')
 
+        # Register in the system
+        if not new_email or not new_name or not new_password:
+            return {'success': False, 'error': 'Email, name, and password are required'}
+
+        if new_role not in ['admin', 'super_admin']:
+            new_role = 'admin'
+
+        # Hash password
+        pw_hash = hashlib.sha256(new_password.encode()).hexdigest()
+        ADMIN_CREDENTIALS[new_email] = {
+            'password_hash': pw_hash,
+            'name': new_name,
+            'role': new_role,
+            'created_at': datetime.now().isoformat()
+        }
+        logger.info(f"✅ Admin account created: {new_email} ({new_role})")
+        return {'success': True, 'message': f'Admin {new_email} registered successfully'}
+
+    except Exception as e:
+        logger.error(f"Admin create error: {e}")
+        return {'success': False, 'error': str(e)}
+
+
 @app.post("/admin/create-account-open")
 async def admin_create_account_open(request: Request):
     """
@@ -19063,6 +19091,29 @@ async def admin_create_account_open(request: Request):
     except Exception as e:
         logger.error(f"Admin registration error: {e}")
         return {'success': False, 'error': str(e)}
+
+        # Register in the system
+        if not new_email or not new_name or not new_password:
+            return {'success': False, 'error': 'Email, name, and password are required'}
+
+        if new_role not in ['admin', 'super_admin']:
+            new_role = 'admin'
+
+        # Hash password
+        pw_hash = hashlib.sha256(new_password.encode()).hexdigest()
+        ADMIN_CREDENTIALS[new_email] = {
+            'password_hash': pw_hash,
+            'name': new_name,
+            'role': new_role,
+            'created_at': datetime.now().isoformat()
+        }
+        logger.info(f"✅ Admin account created: {new_email} ({new_role})")
+        return {'success': True, 'message': f'Admin {new_email} registered successfully'}
+
+    except Exception as e:
+        logger.error(f"Admin create error: {e}")
+        return {'success': False, 'error': str(e)}
+
 
 @app.post("/admin/create-account-open")
 async def admin_create_account_open(request: Request):
