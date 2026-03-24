@@ -18166,12 +18166,9 @@ def _generate_case_suggestions(analysis_result: dict, case_data: dict) -> dict:
     filing_ready = (not is_fatal) and score >= 75 and critical_count == 0
 
 
-    auto_draft_eligible = (
-        case_type == "complainant"
-        and not is_fatal
-        and critical_count == 0
-        and score >= 50
-    )
+    # Always allow draft generation - show warnings but don't block
+    # Only block if score is dangerously low (under 20) with fatal defects
+    auto_draft_eligible = not (is_fatal and score < 20)
 
     return {
         "suggestions": suggestions,
@@ -18346,22 +18343,16 @@ async def auto_draft(request: Request):
         warnings.extend(suggestion_data.get("suggestions", {}).get("high", []))
 
 
+    # NOTE: Draft is generated even with warnings - user sees warnings inline
     if suggestion_data and not suggestion_data.get("auto_draft_eligible", True):
         critical_count = suggestion_data.get("critical_count", 0)
-        return {
-            "success": False,
-            "error": "DRAFT_NOT_ELIGIBLE",
-            "error_type": "CASE_INELIGIBLE",
-            "message": (
-                f"Auto-draft is blocked because {critical_count} fatal/critical issue(s) were detected. "
-                "A complaint filed in this state will likely be rejected. "
-                "Address the critical issues first, then request the draft."
-            ),
-            "suggestions": suggestion_data.get("suggestions", {}),
-            "critical_count": critical_count,
-            "overall_recommendation": suggestion_data.get("overall_recommendation", ""),
-            "resolve_first": suggestion_data.get("suggestions", {}).get("critical", [])
-        }
+        # Add a prominent warning but DO NOT block the draft
+        warnings.insert(0, {
+            "id": "WARN-CRITICAL",
+            "title": f"{critical_count} Critical Issue(s) Detected",
+            "action": "Review and address critical issues before filing this draft.",
+            "priority": "critical"
+        })
 
 
     if analysis_result:
