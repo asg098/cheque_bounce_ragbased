@@ -455,7 +455,9 @@ def save_court_statistics_to_db(court_stats: Dict):
     if not court_stats:
         return
     try:
-        _db_path = globals().get('analytics_db_path') or Path('judiq.db')
+        _db_path = globals().get('analytics_db_path')
+        if not _db_path:
+            return
         conn = sqlite3.connect(_db_path)
         cursor = conn.cursor()
         for court_name, stats in court_stats.items():
@@ -724,8 +726,6 @@ def safe_analysis(func):
     """
     Decorator to add error handling to analysis functions.
     """
-    import functools
-    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         try:
             return func(*args, **kwargs)
@@ -17240,6 +17240,18 @@ async def analyze_case(request: CaseAnalysisRequest, http_request: Request = Non
             "analysis": analysis,
 
 
+            "report": {
+                "section_1_executive_summary": {
+                    "recommended_action": (_exec_summary.get("next_step") or
+                        (_next_actions[0] if _next_actions else "")),
+                    "overall_assessment": _top_summary,
+                    "weaknesses": _exec_summary.get("weaknesses", []),
+                    "filing_reasons": _exec_summary.get("filing_reasons", []),
+                },
+                "section_9_conclusions": {
+                    "final_verdict": _top_summary or _clean_status,
+                }
+            },
             "api_response_time_ms": round((time.time() - start) * 1000, 1),
             "engine_version":       ENGINE_VERSION,
             "maturity_grade":       "Production Stable",
@@ -18981,26 +18993,34 @@ async def admin_create_account(request: Request):
         new_password = data.get('new_password', '')
         new_role = data.get('role', 'admin')
 
-        # Register in the system
+        # Validation
         if not new_email or not new_name or not new_password:
             return {'success': False, 'error': 'Email, name, and password are required'}
+        if len(new_password) < 8:
+            return {'success': False, 'error': 'Password must be at least 8 characters long'}
+        if new_email in ADMIN_CREDENTIALS:
+            return {'success': False, 'error': 'An admin account with this email already exists'}
 
-        if new_role not in ['admin', 'super_admin']:
-            new_role = 'admin'
+        import hashlib
+        password_hash = hashlib.sha256(new_password.encode()).hexdigest()
 
-        # Hash password
-        pw_hash = hashlib.sha256(new_password.encode()).hexdigest()
+        # Save to in-memory credentials
         ADMIN_CREDENTIALS[new_email] = {
-            'password_hash': pw_hash,
+            'password_hash': password_hash,
             'name': new_name,
-            'role': new_role,
-            'created_at': datetime.now().isoformat()
+            'role': new_role
         }
-        logger.info(f"✅ Admin account created: {new_email} ({new_role})")
-        return {'success': True, 'message': f'Admin {new_email} registered successfully'}
+        log_admin_action(auth_email, "REGISTER_ADMIN", new_email, f"Registered new {new_role}: {new_name}")
+        logger.info(f"New admin registered: {new_email} ({new_role}) by {auth_email}")
+
+        return {
+            'success': True,
+            'message': f'Admin account created for {new_email}',
+            'admin': {'email': new_email, 'name': new_name, 'role': new_role}
+        }
 
     except Exception as e:
-        logger.error(f"Admin create error: {e}")
+        logger.error(f'Admin account creation error: {e}')
         return {'success': False, 'error': str(e)}
 
 
@@ -19091,29 +19111,6 @@ async def admin_create_account_open(request: Request):
     except Exception as e:
         logger.error(f"Admin registration error: {e}")
         return {'success': False, 'error': str(e)}
-
-        # Register in the system
-        if not new_email or not new_name or not new_password:
-            return {'success': False, 'error': 'Email, name, and password are required'}
-
-        if new_role not in ['admin', 'super_admin']:
-            new_role = 'admin'
-
-        # Hash password
-        pw_hash = hashlib.sha256(new_password.encode()).hexdigest()
-        ADMIN_CREDENTIALS[new_email] = {
-            'password_hash': pw_hash,
-            'name': new_name,
-            'role': new_role,
-            'created_at': datetime.now().isoformat()
-        }
-        logger.info(f"✅ Admin account created: {new_email} ({new_role})")
-        return {'success': True, 'message': f'Admin {new_email} registered successfully'}
-
-    except Exception as e:
-        logger.error(f"Admin create error: {e}")
-        return {'success': False, 'error': str(e)}
-
 
 @app.post("/admin/create-account-open")
 async def admin_create_account_open(request: Request):
