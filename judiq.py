@@ -37,9 +37,11 @@ def indian_number_format(amount: float) -> str:
     else:
         result = s[-3:]
         s = s[:-3]
-        while s:
+        while len(s) > 2:
             result = s[-2:] + ',' + result
             s = s[:-2]
+        if s:
+            result = s + ',' + result
 
     paise = round((amount % 1) * 100)
     if paise:
@@ -453,7 +455,10 @@ def save_court_statistics_to_db(court_stats: Dict):
     if not court_stats:
         return
     try:
-        conn = sqlite3.connect(analytics_db_path)
+        _db_path = globals().get('analytics_db_path')
+        if not _db_path:
+            return
+        conn = sqlite3.connect(_db_path)
         cursor = conn.cursor()
         for court_name, stats in court_stats.items():
             cursor.execute("""
@@ -16550,7 +16555,7 @@ async def generate_report(case_id: str, format: str = "executive"):
         conn = sqlite3.connect(analytics_db_path)
         cursor = conn.cursor()
 
-        cursor.execute("SELECT analysis_json, case_data FROM case_analyses WHERE case_id = ?", (case_id,))
+        cursor.execute("SELECT analysis_json FROM case_analyses WHERE case_id = ?", (case_id,))
         result = cursor.fetchone()
         conn.close()
 
@@ -16558,20 +16563,8 @@ async def generate_report(case_id: str, format: str = "executive"):
             raise HTTPException(status_code=404, detail="Case not found")
 
         analysis_data = _safe_json_parse(result[0])
-        case_data = _safe_json_parse(result[1]) if result[1] else {}
 
-        if format == "text" or format == "pdf_text":
-            # NEW: Professional text report for PDF export
-            text_report = generate_professional_text_report(analysis_data, case_data)
-            return {
-                "success": True,
-                "case_id": case_id,
-                "format": "text",
-                "report": text_report,
-                "report_text": text_report,
-                "download_ready": True
-            }
-        elif format == "executive":
+        if format == "executive":
             report = generate_executive_report(analysis_data)
         else:
             report = generate_detailed_report(analysis_data)
@@ -17247,6 +17240,18 @@ async def analyze_case(request: CaseAnalysisRequest, http_request: Request = Non
             "analysis": analysis,
 
 
+            "report": {
+                "section_1_executive_summary": {
+                    "recommended_action": (_exec_summary.get("next_step") or
+                        (_next_actions[0] if _next_actions else "")),
+                    "overall_assessment": _top_summary,
+                    "weaknesses": _exec_summary.get("weaknesses", []),
+                    "filing_reasons": _exec_summary.get("filing_reasons", []),
+                },
+                "section_9_conclusions": {
+                    "final_verdict": _top_summary or _clean_status,
+                }
+            },
             "api_response_time_ms": round((time.time() - start) * 1000, 1),
             "engine_version":       ENGINE_VERSION,
             "maturity_grade":       "Production Stable",
@@ -18161,12 +18166,9 @@ def _generate_case_suggestions(analysis_result: dict, case_data: dict) -> dict:
     filing_ready = (not is_fatal) and score >= 75 and critical_count == 0
 
 
-    auto_draft_eligible = (
-        case_type == "complainant"
-        and not is_fatal
-        and critical_count == 0
-        and score >= 50
-    )
+    # Always allow draft generation - show warnings but don't block
+    # Only block if score is dangerously low (under 20) with fatal defects
+    auto_draft_eligible = not (is_fatal and score < 20)
 
     return {
         "suggestions": suggestions,
@@ -18341,22 +18343,16 @@ async def auto_draft(request: Request):
         warnings.extend(suggestion_data.get("suggestions", {}).get("high", []))
 
 
+    # NOTE: Draft is generated even with warnings - user sees warnings inline
     if suggestion_data and not suggestion_data.get("auto_draft_eligible", True):
         critical_count = suggestion_data.get("critical_count", 0)
-        return {
-            "success": False,
-            "error": "DRAFT_NOT_ELIGIBLE",
-            "error_type": "CASE_INELIGIBLE",
-            "message": (
-                f"Auto-draft is blocked because {critical_count} fatal/critical issue(s) were detected. "
-                "A complaint filed in this state will likely be rejected. "
-                "Address the critical issues first, then request the draft."
-            ),
-            "suggestions": suggestion_data.get("suggestions", {}),
-            "critical_count": critical_count,
-            "overall_recommendation": suggestion_data.get("overall_recommendation", ""),
-            "resolve_first": suggestion_data.get("suggestions", {}).get("critical", [])
-        }
+        # Add a prominent warning but DO NOT block the draft
+        warnings.insert(0, {
+            "id": "WARN-CRITICAL",
+            "title": f"{critical_count} Critical Issue(s) Detected",
+            "action": "Review and address critical issues before filing this draft.",
+            "priority": "critical"
+        })
 
 
     if analysis_result:
@@ -18987,6 +18983,37 @@ async def admin_create_account(request: Request):
         new_name = data.get('new_name', '').strip()
         new_password = data.get('new_password', '')
         new_role = data.get('role', 'admin')
+
+        # Validation
+        if not new_email or not new_name or not new_password:
+            return {'success': False, 'error': 'Email, name, and password are required'}
+        if len(new_password) < 8:
+            return {'success': False, 'error': 'Password must be at least 8 characters long'}
+        if new_email in ADMIN_CREDENTIALS:
+            return {'success': False, 'error': 'An admin account with this email already exists'}
+
+        import hashlib
+        password_hash = hashlib.sha256(new_password.encode()).hexdigest()
+
+        # Save to in-memory credentials
+        ADMIN_CREDENTIALS[new_email] = {
+            'password_hash': password_hash,
+            'name': new_name,
+            'role': new_role
+        }
+        log_admin_action(auth_email, "REGISTER_ADMIN", new_email, f"Registered new {new_role}: {new_name}")
+        logger.info(f"New admin registered: {new_email} ({new_role}) by {auth_email}")
+
+        return {
+            'success': True,
+            'message': f'Admin account created for {new_email}',
+            'admin': {'email': new_email, 'name': new_name, 'role': new_role}
+        }
+
+    except Exception as e:
+        logger.error(f'Admin account creation error: {e}')
+        return {'success': False, 'error': str(e)}
+
 
 @app.post("/admin/create-account-open")
 async def admin_create_account_open(request: Request):
@@ -19771,346 +19798,4 @@ def format_concise_output(analysis: Dict) -> str:
             lines.extend(issues)
 
     lines.append("═" * 50)
-    return "\n".join(lines)
-
-
-def generate_professional_text_report(analysis: Dict, case_data: Dict) -> str:
-    """
-    Generate a comprehensive, professional text-based report suitable for PDF export.
-    Fixes all issues: Missing Missing Missing, empty sections, generic text, etc.
-    """
-    lines = []
-    
-    def add_line(text="", indent=0):
-        lines.append(" " * indent + text)
-    
-    def add_section(title, level=1):
-        add_line()
-        if level == 1:
-            add_line("=" * 80)
-            add_line(title.upper().center(80))
-            add_line("=" * 80)
-        elif level == 2:
-            add_line()
-            add_line("-" * 80)
-            add_line(title)
-            add_line("-" * 80)
-        else:
-            add_line()
-            add_line(f"• {title}")
-    
-    def safe_get(data, *keys, default="Not provided"):
-        """Safely get nested dict values, never return 'Missing' or empty"""
-        result = data
-        for key in keys:
-            if isinstance(result, dict):
-                result = result.get(key)
-                if result is None or result == "" or result == "Missing" or result == []:
-                    return default
-            else:
-                return default
-        
-        # Clean up any "Missing Missing" patterns
-        if isinstance(result, str):
-            result = result.replace("Missing Missing", "Not provided")
-            result = result.replace("- Missing -", "")
-            result = result.strip()
-            if not result or result.lower() in ['missing', 'n/a', 'unknown', '--']:
-                return default
-        
-        return result if result else default
-    
-    # ========================================================================
-    # HEADER
-    # ========================================================================
-    add_line("╔" + "═" * 78 + "╗")
-    add_line("║" + "JUDIQ AI - SECTION 138 NI ACT LEGAL INTELLIGENCE".center(78) + "║")
-    add_line("║" + "Comprehensive Case Analysis Report".center(78) + "║")
-    add_line("╚" + "═" * 78 + "╝")
-    add_line()
-    
-    report = analysis.get('report', {})
-    case_overview = report.get('section_0_case_overview', {})
-    exec_summary = report.get('section_1_executive_summary', {})
-    
-    # Case ID and Date
-    add_line(f"Case ID:    {safe_get(analysis, 'case_id', 'Not assigned')}")
-    add_line(f"Generated:  {safe_get(analysis, 'analysis_timestamp', 'N/A')[:19]}")
-    add_line(f"Report Ver: {safe_get(report, 'report_version', '2.0')}")
-    add_line()
-    
-    # ========================================================================
-    # CASE TITLE & DETAILS
-    # ========================================================================
-    complainant = safe_get(case_data, 'complainant_name', '[Complainant Name]')
-    accused = safe_get(case_data, 'accused_name', '[Accused Name]')
-    advocate = safe_get(case_data, 'lawyer_name', '[Advocate Name]')
-    
-    add_section("CASE INFORMATION")
-    add_line(f"Case Title:      {complainant} vs {accused}")
-    add_line(f"Advocate:        {advocate}")
-    add_line(f"Case Type:       {safe_get(case_overview, 'case_type', 'Section 138 NI Act')}")
-    add_line(f"Cheque Amount:   {safe_get(case_overview, 'cheque_amount', 'Not specified')}")
-    add_line(f"Cheque Number:   {safe_get(case_overview, 'cheque_number', 'Not provided')}")
-    add_line(f"Cheque Date:     {safe_get(case_overview, 'cheque_date', 'Not provided')}")
-    add_line(f"Bank:            {safe_get(case_overview, 'bank_name', 'Not provided')}")
-    add_line(f"Dishonour Date:  {safe_get(case_overview, 'dishonour_date', 'Not provided')}")
-    add_line(f"Dishonour Reason: {safe_get(case_overview, 'dishonour_reason', 'Not specified')}")
-    add_line(f"Court Location:  {safe_get(case_overview, 'court_location', 'Not specified')}")
-    
-    # ========================================================================
-    # CASE SCENARIO (NEW - FIX FOR MISSING CONTEXT)
-    # ========================================================================
-    case_scenario = safe_get(case_overview, 'case_scenario', None)
-    if case_scenario and case_scenario != "Not provided":
-        add_section("CASE SCENARIO", 2)
-        add_line(case_scenario, 0)
-    
-    # ========================================================================
-    # RISK SCORE & STATUS
-    # ========================================================================
-    score = safe_get(exec_summary, 'risk_score', '0/100')
-    filing_status = safe_get(exec_summary, 'filing_status', 'Assessment Pending')
-    filing_colour = safe_get(exec_summary, 'filing_colour', 'AMBER')
-    
-    add_section("RISK ASSESSMENT")
-    add_line(f"Overall Risk Score:  {score}")
-    add_line(f"Filing Status:       {filing_status}")
-    add_line(f"Compliance Level:    {safe_get(exec_summary, 'compliance_level', 'Assessment Pending')}")
-    
-    # Filing Reasons (FIX 3 - Transparency)
-    filing_reasons = exec_summary.get('filing_reasons', [])
-    if filing_reasons:
-        add_line()
-        add_line("Why This Status:")
-        for reason in filing_reasons[:5]:
-            if reason and reason != "Missing":
-                add_line(f"  • {reason}")
-    
-    # ========================================================================
-    # EXECUTIVE SUMMARY
-    # ========================================================================
-    add_section("EXECUTIVE SUMMARY", 2)
-    
-    one_line = safe_get(exec_summary, 'one_line_verdict', 'Analysis complete')
-    add_line(one_line, 0)
-    add_line()
-    
-    # Strengths
-    strengths = exec_summary.get('strengths', [])
-    if strengths and any(s for s in strengths if s and s != "Missing"):
-        add_line("Strengths:")
-        for strength in strengths[:5]:
-            if strength and strength != "Missing":
-                clean_strength = strength.replace("Missing Missing", "").strip()
-                if clean_strength:
-                    add_line(f"  ✓ {clean_strength}")
-        add_line()
-    
-    # Weaknesses
-    weaknesses = exec_summary.get('weaknesses', [])
-    if weaknesses and any(w for w in weaknesses if w and w != "Missing"):
-        add_line("Weaknesses & Risks:")
-        for weakness in weaknesses[:5]:
-            if weakness and weakness != "Missing":
-                clean_weakness = weakness.replace("Missing Missing", "Not provided").replace("- Missing -", "").strip()
-                if clean_weakness:
-                    add_line(f"  ✗ {clean_weakness}")
-        add_line()
-    
-    # Recommended Action
-    rec_action = safe_get(exec_summary, 'recommended_action', 'Consult legal counsel')
-    add_line("Recommended Action:")
-    add_line(f"  {rec_action}", 0)
-    
-    # ========================================================================
-    # TIMELINE ANALYSIS
-    # ========================================================================
-    timeline = report.get('section_2_timeline', {})
-    add_section("TIMELINE ANALYSIS", 2)
-    
-    add_line(f"Limitation Risk: {safe_get(timeline, 'limitation_risk', 'Under review')}")
-    add_line(f"Limitation Status: {safe_get(timeline, 'limitation_status', 'Under review')}")
-    add_line()
-    
-    # Timeline events
-    events = timeline.get('chronological_events', [])
-    if events:
-        add_line("Chronological Events:")
-        for event in events:
-            date = safe_get(event, 'date', 'Date not specified')
-            evt_name = safe_get(event, 'event', 'Event')
-            status = safe_get(event, 'status', '')
-            add_line(f"  {date:<15} {evt_name:<40} {status}")
-        add_line()
-    
-    # Timeline caveat (FIX 5)
-    caveat = timeline.get('compliance_caveat')
-    if caveat:
-        add_line("⚠ IMPORTANT NOTE:")
-        add_line(f"  {caveat}")
-        add_line()
-    
-    # ========================================================================
-    # DOCUMENTARY EVIDENCE
-    # ========================================================================
-    doc_section = report.get('section_4_documentary', {})
-    add_section("DOCUMENTARY EVIDENCE ASSESSMENT", 2)
-    
-    add_line(f"Overall Strength: {safe_get(doc_section, 'overall_strength', 'Assessment pending')}")
-    add_line(f"Assessment: {safe_get(doc_section, 'strength_label', 'Under review')}")
-    add_line()
-    
-    # Priority-categorized missing documents (FIX 6)
-    missing_by_priority = doc_section.get('missing_by_priority', {})
-    
-    critical_missing = missing_by_priority.get('critical', [])
-    if critical_missing:
-        add_line("CRITICAL Priority - Missing:")
-        for item in critical_missing:
-            name = item.get('name', 'Document')
-            desc = item.get('description', '')
-            add_line(f"  ✗ {name}")
-            if desc:
-                add_line(f"    {desc}", 4)
-        add_line()
-    
-    high_missing = missing_by_priority.get('high', [])
-    if high_missing:
-        add_line("HIGH Priority - Missing:")
-        for item in high_missing:
-            name = item.get('name', 'Document')
-            desc = item.get('description', '')
-            add_line(f"  ✗ {name}")
-            if desc:
-                add_line(f"    {desc}", 4)
-        add_line()
-    
-    medium_missing = missing_by_priority.get('medium', [])
-    if medium_missing:
-        add_line("MEDIUM Priority - Missing:")
-        for item in medium_missing:
-            name = item.get('name', 'Document')
-            add_line(f"  ○ {name}")
-        add_line()
-    
-    # All documents status
-    documents = doc_section.get('documents', [])
-    if documents:
-        add_line("Document Checklist:")
-        for doc in documents:
-            name = safe_get(doc, 'document', 'Document')
-            status = safe_get(doc, 'status', 'Unknown')
-            priority = safe_get(doc, 'priority', '')
-            add_line(f"  {status:<20} {name:<30} [{priority}]")
-        add_line()
-    
-    # ========================================================================
-    # DEFENCE ANALYSIS (FIX 7 - Connected to Facts)
-    # ========================================================================
-    defence_section = report.get('section_5_defence', {})
-    add_section("DEFENCE RISK ANALYSIS", 2)
-    
-    add_line(f"Overall Exposure: {safe_get(defence_section, 'overall_exposure', 'Under assessment')}")
-    add_line()
-    
-    high_risk_defences = defence_section.get('high_risk_defences', [])
-    if high_risk_defences:
-        add_line("High-Risk Defence Angles:")
-        for i, defence in enumerate(high_risk_defences[:5], 1):
-            defence_name = safe_get(defence, 'defence', 'Defence angle')
-            strength = safe_get(defence, 'strength', 'TBD')
-            factual_basis = safe_get(defence, 'factual_basis', 'Case-specific assessment required')
-            legal_basis = safe_get(defence, 'legal_basis', 'Statutory provision')
-            strategy = safe_get(defence, 'strategy', 'Requires case-specific strategy')
-            
-            add_line(f"{i}. {defence_name}")
-            add_line(f"   Strength: {strength}", 3)
-            add_line(f"   Why This Defence Works: {factual_basis}", 3)
-            add_line(f"   Legal Basis: {legal_basis}", 3)
-            add_line(f"   Counter-Strategy: {strategy}", 3)
-            add_line()
-    
-    # ========================================================================
-    # SETTLEMENT ANALYSIS (FIX 8 - With Reasoning)
-    # ========================================================================
-    settlement = analysis.get('modules', {}).get('settlement_analysis', {})
-    if settlement:
-        add_section("SETTLEMENT & FINANCIAL EXPOSURE", 2)
-        
-        leverage = safe_get(settlement, 'settlement_leverage', 'Under assessment')
-        probability = safe_get(settlement, 'settlement_probability', 'Under assessment')
-        reasoning = safe_get(settlement, 'settlement_reasoning', None)
-        
-        add_line(f"Settlement Leverage: {leverage}")
-        add_line(f"Settlement Probability: {probability}")
-        
-        if reasoning and reasoning != "Not provided":
-            add_line()
-            add_line("Reasoning:")
-            add_line(f"  {reasoning}")
-        
-        add_line()
-        
-        # Settlement options
-        options = settlement.get('strategic_options', [])
-        if options:
-            add_line("Strategic Options:")
-            for i, option in enumerate(options[:3], 1):
-                opt_name = safe_get(option, 'option', 'Option')
-                rationale = safe_get(option, 'rationale', '')
-                impact = safe_get(option, 'financial_impact', '')
-                
-                add_line(f"{i}. {opt_name}")
-                if rationale:
-                    add_line(f"   Rationale: {rationale}", 3)
-                if impact:
-                    add_line(f"   Financial Impact: {impact}", 3)
-                add_line()
-    
-    # ========================================================================
-    # FINAL VERDICT (FIX 10)
-    # ========================================================================
-    conclusions = report.get('section_9_conclusions', {})
-    final_verdict = safe_get(conclusions, 'final_verdict', None)
-    
-    if final_verdict and final_verdict != "Not provided":
-        add_section("FINAL VERDICT", 1)
-        add_line()
-        add_line(final_verdict, 0)
-        add_line()
-    
-    # ========================================================================
-    # IMMEDIATE ACTIONS
-    # ========================================================================
-    immediate_actions = conclusions.get('immediate_actions', [])
-    if immediate_actions:
-        add_section("IMMEDIATE ACTIONS REQUIRED", 2)
-        for i, action in enumerate(immediate_actions[:5], 1):
-            if action and action != "Missing":
-                clean_action = action.replace("Missing Missing", "").strip()
-                if clean_action:
-                    add_line(f"{i}. {clean_action}")
-        add_line()
-    
-    # ========================================================================
-    # FOOTER / DISCLAIMER
-    # ========================================================================
-    add_line()
-    add_line("=" * 80)
-    add_line("DISCLAIMER".center(80))
-    add_line("=" * 80)
-    disclaimer = safe_get(conclusions, 'disclaimer', 
-        'This report is a structured statutory compliance assessment. '
-        'It does not constitute legal advice. All findings must be reviewed '
-        'by qualified legal counsel before filing or making legal decisions.')
-    add_line(disclaimer, 0)
-    add_line()
-    add_line(f"Engine Version: {safe_get(exec_summary, 'engine_version', 'v10.0')}")
-    add_line(f"Generated by: {safe_get(exec_summary, 'generated_by', 'JUDIQ Legal Intelligence Engine')}")
-    add_line()
-    add_line("=" * 80)
-    add_line("END OF REPORT".center(80))
-    add_line("=" * 80)
-    
     return "\n".join(lines)
