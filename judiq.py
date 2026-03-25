@@ -3663,7 +3663,7 @@ def analyze_timeline(case_data: Dict) -> Dict:
                 })
         elif dishonour_date and not notice_date:
             timeline_analysis['edge_cases_detected'].append({
-                'case': 'Missing Notice Date',
+                'case': 'Notice Date Not Provided',
                 'severity': 'CRITICAL',
                 'issue': 'Cannot assess notice timing compliance without notice_date'
             })
@@ -6592,7 +6592,7 @@ def analyze_settlement_exposure(case_data: Dict, risk_score_data: Dict) -> Dict:
             'maximum_recoverable': cheque_amount,
             'interim_compensation': f'Up to 20% ({cheque_amount * 0.20:.2f}) pending trial under Section 143A',
             'conviction_scenario': 'Fine (up to 2x amount) + Compensation (up to amount) + Costs',
-            'acquittal_scenario': 'No recovery, legal costs incurred'
+            'acquittal_scenario': 'Recovery uncertain; legal costs likely'
         }
 
         if (risk_score_data.get('final_score') or 0) >= 60:
@@ -8564,8 +8564,12 @@ def generate_executive_summary(
         s = _n(data.get('score') if isinstance(data, dict) else data)
         if s < 60:
             reason = (data.get('reason', '') or '') if isinstance(data, dict) else ''
+            # Clean up any "Missing" text in reason to prevent duplication
+            reason = reason.replace('Missing Missing', 'Missing').replace('Missing', '').strip()
+            # Remove leading/trailing dashes and whitespace
+            reason = reason.strip(' -—').strip()
             weaknesses.append(
-                f"{cat}: {s}/100 — {reason or 'Insufficient — strengthen before filing'} ❌"
+                f"{cat}: {s}/100 — {reason or 'Insufficient — strengthen documentary evidence before filing'} ❌"
             )
     if not case_data.get('written_agreement_exists'):
         weaknesses.append("No written agreement available — enforceability risk ❌")
@@ -9609,7 +9613,10 @@ def generate_clean_professional_report(analysis: Dict, case_data: Dict) -> Dict:
         s = _safe_score(data.get('score') if isinstance(data, dict) else data)
         if s < 60:
             reason = data.get('reason', '') if isinstance(data, dict) else ''
-            weaknesses.append(f"{cat}: {s}/100 — {_safe(reason, 'Insufficient — strengthen before filing')}")
+            # Clean up any "Missing" text in reason to prevent duplication
+            reason = str(reason).replace('Missing Missing', 'Missing').replace('Missing', '').strip()
+            reason = reason.strip(' -—').strip()
+            weaknesses.append(f"{cat}: {s}/100 — {_safe(reason, 'Insufficient — strengthen documentary evidence before filing')}")
     if not case_data.get('written_agreement_exists'):
         weaknesses.append("No documentary proof of legally enforceable debt — accused can challenge the fundamental Section 138 ingredient")
     if not case_data.get('ledger_available'):
@@ -9918,8 +9925,16 @@ def generate_clean_professional_report(analysis: Dict, case_data: Dict) -> Dict:
 
     vuln_zones = cross_exam.get('vulnerability_zones', [])
     likely_qs  = cross_exam.get('likely_questions', [])
+    
+    # Add prominent warning if documentary evidence is weak
+    cross_exam_warning = ""
+    if not case_data.get('written_agreement_exists') or not case_data.get('ledger_available'):
+        cross_exam_warning = "High probability of failure during cross-examination due to lack of supporting documentary evidence."
+    
     cx_section = {
         'title': 'CROSS-EXAMINATION RISK',
+        'risk_warning': cross_exam_warning,
+        'risk_context': cross_exam_warning,  # HTML looks for this field
         'overall_risk': R.get('cross_exam_risk', _safe(cross_exam.get('overall_cross_exam_risk'), 'Insufficient data')),
         'vulnerability_zones': R.get('cross_exam_zones') or [
             {
@@ -10140,7 +10155,7 @@ def generate_clean_professional_report(analysis: Dict, case_data: Dict) -> Dict:
             'method': 'Weighted severity-based deductions',
             'severity_tiers': [
                 {'tier': 'CRITICAL', 'deduction': '-20 to -30 points', 'examples': 'Limitation expired, Notice beyond 1 month'},
-                {'tier': 'MAJOR', 'deduction': '-10 to -15 points', 'examples': 'Missing postal proof, Weak documentation'},
+                {'tier': 'MAJOR', 'deduction': '-10 to -15 points', 'examples': 'No postal proof available, Weak documentation'},
                 {'tier': 'MINOR', 'deduction': '-5 points', 'examples': 'Incomplete addresses, Date format issues'}
             ],
             'fatal_override': 'Automatic cap at 25 for catastrophic defects (limitation/validity failure)'
@@ -15392,7 +15407,7 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         _tl_score_narrative  = float((analysis_report.get('modules', {}).get('risk_assessment', {}).get('category_scores') or {}).get('Timeline Compliance', {}).get('score', 0) if isinstance((analysis_report.get('modules', {}).get('risk_assessment', {}).get('category_scores') or {}).get('Timeline Compliance'), dict) else 0)
         analysis_report['decision_narrative'] = [
             f"Timeline compliance: {_tl_score_narrative:.0f}/100 — {'Strong ✅' if _tl_score_narrative >= 75 else 'Weak ❌'}",
-            f"Documentary strength: {_doc_score_narrative:.0f}/100 — {'Adequate ✅' if _doc_score_narrative >= 60 else 'Insufficient — strengthen before filing ❌'}",
+            f"Documentary strength: {_doc_score_narrative:.0f}/100 — {'Adequate ✅' if _doc_score_narrative >= 60 else 'Insufficient — strengthen documentary evidence before filing ❌'}",
             f"Fatal defects: {'Yes — filing blocked' if _fatal_for_narrative else 'None detected ✅'}",
             f"Overall score: {_score_for_narrative:.1f}/100",
             f"Decision basis: {'Fatal defect present — do not file' if _fatal_for_narrative else 'FILE WITH CAUTION — documentary weakness is primary gap' if _score_for_narrative < 70 else 'Case is strong — proceed to file'}",
