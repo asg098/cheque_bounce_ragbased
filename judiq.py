@@ -1002,11 +1002,18 @@ def generate_cross_examination_questions(
     """Cross-examination on Render uses rule-based engine only (no Phi-2)."""
     questions = _rule_based_fallback_questions(case_data, witness_type, num_questions)
     summary   = _build_summary_section(questions, witness_type, case_data)
+    
+    # Add risk context when documentary evidence is weak
+    risk_context = ""
+    if not case_data.get('written_agreement_exists') or not case_data.get('ledger_available'):
+        risk_context = "High probability of failure during cross-examination due to lack of supporting documentary evidence."
+    
     return {
         'enabled': True,
         'witness_type': witness_type,
         'questions': questions,
         'summary': summary,
+        'risk_context': risk_context,
         'model': 'rule-based (Phi-2 disabled on Render)',
         'question_count': len(questions),
         'disclaimer': 'Rule-based questions derived from case facts. Review with legal counsel.'
@@ -4417,7 +4424,7 @@ def analyze_presumption_rebuttal(case_data: Dict, ingredient_data: Dict, doc_dat
                 'Consider settlement negotiations'
             ]
     else:
-        presumption_analysis['current_stage'] = 'Stage 2: No Rebuttal Attempted'
+        presumption_analysis['current_stage'] = 'Stage 2: No rebuttal evidence provided — presumption remains unrebutted'
         presumption_analysis['burden_position'] = 'On Accused - Presumption Unrebutted'
         presumption_analysis['rebuttal_strength'] = 'NONE'
 
@@ -4520,19 +4527,19 @@ def analyze_security_cheque_probability(case_data: Dict) -> Dict:
     if probability_score >= 70:
         probability = 'VERY HIGH'
         defence_strength = 'VERY STRONG'
-        recommendation = 'CRITICAL RISK - Security cheque defence highly likely to succeed'
+        recommendation = 'Security cheque defence likely to succeed due to lack of documentary proof of legally enforceable debt'
     elif probability_score >= 50:
         probability = 'HIGH'
         defence_strength = 'STRONG'
-        recommendation = 'HIGH RISK - Strong security cheque defence probable'
+        recommendation = 'Security cheque defence probable — strengthen documentary evidence before filing'
     elif probability_score >= 30:
         probability = 'MEDIUM'
         defence_strength = 'MODERATE'
-        recommendation = 'MODERATE RISK - Security cheque defence possible'
+        recommendation = 'Security cheque defence possible — obtain written agreement and transaction records'
     else:
         probability = 'LOW'
         defence_strength = 'WEAK'
-        recommendation = 'LOW RISK - Security cheque defence unlikely'
+        recommendation = 'Security cheque defence unlikely — documentary evidence appears adequate'
 
     return {
         'module': 'Security Cheque Probability Analysis',
@@ -8369,7 +8376,7 @@ def generate_executive_summary(
         return v
 
     def _n(v, fb=0.0):
-        try: return round(float(v), 1)
+        try: return round(float(v))
         except Exception: return fb
 
     def _d(v):
@@ -8550,14 +8557,14 @@ def generate_executive_summary(
                 f"{cat}: {s}/100 — {reason or 'Insufficient — strengthen before filing'} ❌"
             )
     if not case_data.get('written_agreement_exists'):
-        weaknesses.append("No written agreement — debt enforceability can be challenged ❌")
+        weaknesses.append("No written agreement available — enforceability risk ❌")
 
 
     _doc_score = _n(_doc.get('overall_strength_score'))
     _has_primary = case_data.get('original_cheque_available') and case_data.get('return_memo_available')
     _missing_secondary = not case_data.get('written_agreement_exists') or not case_data.get('ledger_available')
     if _has_primary and _missing_secondary and _doc_score < 60:
-        documentary_context = "No documentary proof of legally enforceable debt."
+        documentary_context = "Very weak due to absence of written agreement, financial records, and proof of notice service, significantly weakening enforceability."
     elif _doc_score >= 70:
         documentary_context = "Documentary evidence is in reasonable order."
     else:
@@ -8566,7 +8573,7 @@ def generate_executive_summary(
     if not case_data.get('ledger_available'):
         weaknesses.append("No financial records — transaction trail incomplete ❌")
     if not case_data.get('postal_proof_available'):
-        weaknesses.append("No postal proof — notice service presumption weak ❌")
+        weaknesses.append("No proof of notice service — procedural defect ❌")
     if not weaknesses:
         weaknesses.append("No critical weaknesses at this stage")
 
@@ -8745,8 +8752,8 @@ def generate_executive_summary(
         )
     elif score >= 55:
         top_summary = (
-            f"Case is legally maintainable but weakened due to lack of documentary proof of debt. "
-            f"Score: {score}/100. Strengthen documentation before filing."
+            f"Case is legally maintainable but significantly weakened due to absence of documentary proof of legally enforceable debt, exposing it to strong defence challenge. "
+            f"Score: {score}/100."
         )
     else:
         top_summary = (
@@ -9756,11 +9763,9 @@ def generate_clean_professional_report(analysis: Dict, case_data: Dict) -> Dict:
         'document_gaps': R.get('documentary_gaps', []),
         'score_explanation': (
             f"Documentary strength: {R.get('documentary_score', _safe_score(documentary.get('overall_strength_score')))}/100. "
-            + ("No written agreement or financial records — accused can challenge the existence of a "
-               "legally enforceable debt, which is a fundamental Section 138 ingredient. "
-               "Obtain corroborating evidence (agreement, ledger, bank transfer, SMS) before filing."
+            + ("Very weak due to absence of written agreement, financial records, and proof of notice service, significantly weakening enforceability."
                if not case_data.get('written_agreement_exists') and not case_data.get('ledger_available') else
-               "No written agreement — accused can challenge the legally enforceable debt ingredient. "
+               "No written agreement available — enforceability risk. "
                "Obtain documentary evidence before filing."
                if not case_data.get('written_agreement_exists') else
                "Documentary evidence is in reasonable order.")
