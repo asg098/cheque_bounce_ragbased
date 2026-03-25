@@ -117,6 +117,56 @@ def safe_get(data: Dict, *keys, default=None):
     return result if result is not None else default
 
 
+def sanitize_text(text: str) -> str:
+    """
+    Global text sanitizer to eliminate all 'Missing Missing' patterns and clean up text.
+    This is the FINAL fix to prevent any 'Missing' duplication from reaching the output.
+    """
+    if not text or not isinstance(text, str):
+        return text
+    
+    # AGGRESSIVE MULTI-PASS CLEANUP
+    max_iterations = 10
+    for _ in range(max_iterations):
+        prev = text
+        
+        # Remove all variations of "Missing Missing"
+        text = text.replace('Missing Missing Missing', '')
+        text = text.replace('Missing Missing', '')
+        text = text.replace('Missing - Missing', '')
+        text = text.replace('Missing  Missing', '')
+        text = text.replace('- Missing Missing', '')
+        text = text.replace('Missing -', '')
+        
+        # If no change, we're done
+        if text == prev:
+            break
+    
+    # Now remove any remaining single "Missing" and replace with proper phrasing
+    # But keep context-aware - don't blindly strip all "Missing"
+    text = text.replace('Missing written agreement', 'No written agreement available')
+    text = text.replace('Missing financial records', 'No financial records available')
+    text = text.replace('Missing rebuttal evidence', 'No rebuttal evidence provided')
+    text = text.replace('Missing postal receipt', 'No postal proof available')
+    text = text.replace('Missing proof of debt', 'No proof of debt available')
+    text = text.replace('Missing documentary', 'No documentary evidence')
+    text = text.replace('Missing legally enforceable', 'No legally enforceable debt proven')
+    
+    # Remove duplicate "Present Present"
+    text = text.replace('Present Present', 'Present')
+    text = text.replace('Present - Present', 'Present')
+    
+    # Clean up dashes and spaces
+    text = text.replace('- - ', ' ')
+    text = text.replace(' - - ', ' ')
+    text = text.strip(' -—').strip()
+    
+    # Clean up duplicate spaces
+    text = ' '.join(text.split())
+    
+    return text
+
+
 def format_timeline_transparency(timeline_data: Dict) -> Dict:
 
     transparent_timeline = {
@@ -8554,13 +8604,8 @@ def generate_executive_summary(
         s = _n(data.get('score') if isinstance(data, dict) else data)
         if s < 60:
             reason = (data.get('reason', '') or '') if isinstance(data, dict) else ''
-            # Clean up any "Missing" text in reason to prevent duplication
-            # Handle: "Missing Missing X", "Missing X", "- Missing X", etc.
-            reason = reason.replace('Missing Missing', '').replace('Missing', '').strip()
-            # Remove leading/trailing dashes and whitespace
-            reason = reason.strip(' -—').strip()
-            # Clean up duplicate spaces
-            reason = ' '.join(reason.split())
+            # Apply global sanitizer to clean all Missing patterns
+            reason = sanitize_text(reason)
             weaknesses.append(
                 f"{cat}: {s}/100 — {reason or 'Insufficient — strengthen documentary evidence before filing'} ❌"
             )
@@ -9606,12 +9651,8 @@ def generate_clean_professional_report(analysis: Dict, case_data: Dict) -> Dict:
         s = _safe_score(data.get('score') if isinstance(data, dict) else data)
         if s < 60:
             reason = data.get('reason', '') if isinstance(data, dict) else ''
-            # Clean up any "Missing" text in reason to prevent duplication
-            # Handle: "Missing Missing X", "Missing X", "- Missing X", etc.
-            reason = str(reason).replace('Missing Missing', '').replace('Missing', '').strip()
-            reason = reason.strip(' -—').strip()
-            # Clean up duplicate spaces
-            reason = ' '.join(reason.split())
+            # Apply global sanitizer to clean all Missing patterns
+            reason = sanitize_text(reason)
             weaknesses.append(f"{cat}: {s}/100 — {_safe(reason, 'Insufficient — strengthen documentary evidence before filing')}")
     if not case_data.get('written_agreement_exists'):
         weaknesses.append("No documentary proof of legally enforceable debt — accused can challenge the fundamental Section 138 ingredient")
@@ -16275,6 +16316,22 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         else:
             analysis_report['audit_trail']['database_saved'] = True
 
+        # CRITICAL: Apply global text sanitization to ALL strings in the entire analysis_report
+        # This is the FINAL defense against "Missing Missing" patterns reaching the frontend
+        def sanitize_nested_dict(obj):
+            """Recursively sanitize all strings in a nested data structure"""
+            if isinstance(obj, dict):
+                return {k: sanitize_nested_dict(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [sanitize_nested_dict(item) for item in obj]
+            elif isinstance(obj, str):
+                return sanitize_text(obj)
+            else:
+                return obj
+        
+        logger.info("🧹 Applying final text sanitization pass...")
+        analysis_report = sanitize_nested_dict(analysis_report)
+        logger.info("✅ Text sanitization complete")
 
         return analysis_report
 
