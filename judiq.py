@@ -17042,15 +17042,6 @@ async def analyze_case(request: CaseAnalysisRequest, http_request: Request = Non
 
         analysis['audit_trail'] = audit.get_trail()
 
-        # Save analysis to database for case history
-        try:
-            db_saved = save_analysis_to_db(analysis)
-            if db_saved:
-                logger.info(f"✅ Analysis saved to database: {analysis.get('case_id', 'unknown')}")
-            else:
-                logger.warning("⚠️ Failed to save analysis to database")
-        except Exception as db_err:
-            logger.error(f"❌ Database save error: {db_err}")
 
         if input_warnings:
             analysis['input_warnings'] = input_warnings
@@ -17638,7 +17629,13 @@ def main():
     uvicorn.run(app, host=CONFIG["HOST"], port=port, log_level="info")
 
 
-# Admin credentials removed
+ADMIN_CREDENTIALS = {
+    "admin@judiq.com": {
+        "password_hash": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+        "name": "Admin User",
+        "role": "super_admin"
+    }
+}
 
 
 def get_db_connection() -> sqlite3.Connection:
@@ -17649,9 +17646,161 @@ def get_db_connection() -> sqlite3.Connection:
     return conn
 
 
+def _load_db_admins():
+    """Load persisted admin accounts from DB into ADMIN_CREDENTIALS memory dict."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT email, name, role, password_hash FROM admin_accounts")
+        for row in cursor.fetchall():
+            email, name, role, pw_hash = row
+            if email not in ADMIN_CREDENTIALS:
+                ADMIN_CREDENTIALS[email] = {
+                    "password_hash": pw_hash,
+                    "name": name,
+                    "role": role
+                }
+        conn.close()
+        loaded = len(ADMIN_CREDENTIALS)
+        logger.info(f"✅ Loaded {loaded} admin account(s) into memory")
+    except Exception as e:
+        logger.warning(f"Could not load DB admins: {e}")
+
+
+def init_admin_tables():
+    """Initialize admin-related database tables"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_limits (
+                user_email TEXT PRIMARY KEY,
+                daily_limit INTEGER DEFAULT 3,
+                is_unlimited BOOLEAN DEFAULT 0,
+                custom_limit_reason TEXT,
+                set_by_admin TEXT,
+                set_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS admin_activity_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                admin_email TEXT,
+                action_type TEXT,
+                target_user TEXT,
+                action_details TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS draft_logs (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_email      TEXT    NOT NULL,
+                draft_timestamp TEXT    NOT NULL,
+                case_id         TEXT,
+                draft_type      TEXT    DEFAULT 'complaint',
+                created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_draft_email ON draft_logs(user_email)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_draft_ts ON draft_logs(draft_timestamp)"
+        )
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS admin_accounts (
+                email       TEXT PRIMARY KEY,
+                name        TEXT NOT NULL,
+                role        TEXT NOT NULL DEFAULT 'admin',
+                password_hash TEXT NOT NULL,
+                created_by  TEXT,
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # ENSURE default super-admin exists in database
+        cursor.execute("SELECT email FROM admin_accounts WHERE email = ?", ("admin@judiq.com",))
+        if not cursor.fetchone():
+            logger.info("🔧 Creating default super-admin in database...")
+            cursor.execute("""
+                INSERT INTO admin_accounts (email, name, role, password_hash, created_by)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                "admin@judiq.com",
+                "Super Admin",
+                "super_admin",
+                "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",  # password = "password"
+                "SYSTEM"
+            ))
+            logger.info("✅ Default super-admin created: admin@judiq.com / password")
+
+        conn.commit()
+        conn.close()
+        logger.info("✅ Admin tables initialized")
+        _load_db_admins()
+        return True
+    except Exception as e:
+        logger.error(f"❌ Error initializing admin tables: {e}")
+        return False
+
+
+init_admin_tables()
+
+def verify_admin(email: str, password: str) -> bool:
+    """Verify admin credentials"""
+    import hashlib
+    if email not in ADMIN_CREDENTIALS:
+        return False
+
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
+    return ADMIN_CREDENTIALS[email]["password_hash"] == password_hash
+
+def log_admin_action(admin_email: str, action_type: str, target_user: str = None, details: str = None):
+    """Log admin actions for audit trail"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO admin_activity_log (admin_email, action_type, target_user, action_details)
+            VALUES (?, ?, ?, ?)
+        ''', (admin_email, action_type, target_user, details))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Error logging admin action: {e}")
+
 def get_user_limit(user_email: str) -> int:
-    """Get daily analysis limit - default 10 for all users"""
-    return 10
+    """Get custom limit for user, or default 3"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT daily_limit, is_unlimited
+            FROM user_limits
+            WHERE user_email = ?
+        ''', (user_email,))
+        result = cursor.fetchone()
+        conn.close()
+
+        if result:
+            is_unlimited = result[1]
+            if is_unlimited:
+                return 999999
+            return result[0]
+        return 3
+    except Exception as e:
+        logger.error(f"Error getting user limit: {e}")
+        return 3
+
 
 def check_daily_limit(user_email: str) -> Tuple[bool, int]:
     """
@@ -18102,6 +18251,409 @@ async def suggest(request: Request):
     }
 
 
+@app.post("/auto-draft")
+async def auto_draft(request: Request):
+    """
+    Analyse case data, generate smart suggestions, and immediately produce
+    a tailored Section 138 complaint draft — all in one call.
+
+    Daily limit: 3 drafts per user (shared with /generate-draft).
+
+    Body:
+      {
+        "user_email":  "lawyer@example.com",
+        "case_data":   { <full CaseAnalysisRequest fields> },
+        "case_id":     "<optional — links to existing analysis>",
+        "analysis":    <optional — pre-computed analysis result>
+      }
+
+    Returns:
+      - suggestions:  prioritised suggestions from the analysis
+      - draft_text:   complete Section 138 complaint text
+      - sections:     structured dict of complaint sections
+      - warnings:     suggestions that should be resolved BEFORE filing
+      - usage:        { used, limit, remaining, exhausted }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    user_email      = body.get("user_email", "")
+    case_data       = body.get("case_data", {})
+    case_id         = body.get("case_id", "")
+    analysis_result = body.get("analysis")
+    draft_type      = "auto_draft"
+
+
+    if user_email:
+        is_allowed, used_today = check_draft_limit(user_email)
+        if not is_allowed:
+            return {
+                "success": False,
+                "error": "DRAFT_LIMIT_REACHED",
+                "error_type": "RATE_LIMIT",
+                "message": (
+                    f"Daily draft limit of 3 reached. "
+                    f"You have generated {used_today}/3 drafts today. "
+                    "Please try again tomorrow."
+                ),
+                "usage": {
+                    "used": used_today,
+                    "limit": 3,
+                    "remaining": 0,
+                    "exhausted": True
+                },
+                "next_reset": (date.today() + timedelta(days=1)).isoformat() + "T00:00:00"
+            }
+    else:
+        used_today = 0
+
+
+    if not analysis_result and case_id:
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT analysis_json FROM case_analyses WHERE case_id = ?",
+                (case_id,)
+            )
+            row = cursor.fetchone()
+            conn.close()
+            if row and row[0]:
+                analysis_result = json.loads(row[0])
+                if not case_data:
+                    case_data = analysis_result.get("case_metadata", {})
+        except Exception as e:
+            logger.warning(f"Could not load stored analysis for auto-draft: {e}")
+
+
+    suggestion_data = {}
+    if analysis_result:
+        try:
+            suggestion_data = _generate_case_suggestions(analysis_result, case_data)
+        except Exception as e:
+            logger.warning(f"Suggestion step failed in auto-draft: {e}")
+            suggestion_data = {}
+
+
+    warnings = []
+    if suggestion_data:
+        warnings.extend(suggestion_data.get("suggestions", {}).get("critical", []))
+        warnings.extend(suggestion_data.get("suggestions", {}).get("high", []))
+
+
+    # NOTE: Draft is generated even with warnings - user sees warnings inline
+    if suggestion_data and not suggestion_data.get("auto_draft_eligible", True):
+        critical_count = suggestion_data.get("critical_count", 0)
+        # Add a prominent warning but DO NOT block the draft
+        warnings.insert(0, {
+            "id": "WARN-CRITICAL",
+            "title": f"{critical_count} Critical Issue(s) Detected",
+            "action": "Review and address critical issues before filing this draft.",
+            "priority": "critical"
+        })
+
+
+    if analysis_result:
+        _mods = analysis_result.get("modules", {})
+
+
+        _tl = _mods.get("timeline_intelligence", analysis_result.get("timeline", {})) or {}
+        _dates = _tl.get("dates", _tl.get("critical_dates", {})) or {}
+        for _fld in ("cheque_date", "dishonour_date", "notice_date", "complaint_filed_date"):
+            if not case_data.get(_fld) and _dates.get(_fld):
+                case_data[_fld] = _dates[_fld]
+
+
+        _coa = _tl.get("cause_of_action_date") or _tl.get("cause_of_action", {})
+        if isinstance(_coa, str):
+            case_data["cause_of_action_date"] = _coa
+        elif isinstance(_coa, dict):
+            case_data["cause_of_action_date"] = _coa.get("date", "")
+
+
+        _jur = _mods.get("territorial_jurisdiction", analysis_result.get("jurisdiction", {})) or {}
+        if not case_data.get("jurisdiction") and _jur.get("recommended_jurisdiction"):
+            case_data["jurisdiction"] = _jur["recommended_jurisdiction"]
+
+
+    try:
+        draft = _build_enhanced_complaint_draft(case_data, suggestion_data)
+    except Exception as e:
+        logger.error(f"Auto-draft build error: {e}")
+        raise HTTPException(status_code=500, detail=f"Draft generation failed: {str(e)}")
+
+
+    if user_email:
+        log_draft_usage(user_email, case_id=case_id, draft_type=draft_type)
+        used_today += 1
+
+    remaining = max(0, 3 - used_today)
+
+    return {
+        "success": True,
+        "draft_type": "auto_draft",
+        "case_id": case_id or (analysis_result or {}).get("case_id") or "",
+        "draft_text": draft["full_text"],
+        "sections": draft["sections"],
+        "word_count": len(draft["full_text"].split()),
+        "suggestions": suggestion_data.get("suggestions", {}),
+        "filing_ready": suggestion_data.get("filing_ready", False),
+        "overall_recommendation": suggestion_data.get("overall_recommendation", ""),
+        "warnings": warnings,
+        "warning_count": len(warnings),
+        "usage": {
+            "used": used_today,
+            "limit": 3,
+            "remaining": remaining,
+            "exhausted": remaining == 0
+        },
+        "next_reset": (date.today() + timedelta(days=1)).isoformat() + "T00:00:00",
+        "disclaimer": (
+            "This draft is AI-generated for reference only. "
+            "Always review with qualified legal counsel before filing. "
+            "Address all warnings (if any) before submitting to court."
+        )
+    }
+
+
+def _build_enhanced_complaint_draft(case_data: dict, suggestion_data: dict) -> dict:
+    """
+    Build an enhanced, suggestion-aware Section 138 NI Act complaint draft.
+    Inserts additional paragraphs when analysis flags specific risks.
+    Returns { full_text: str, sections: dict }.
+    """
+    complainant   = case_data.get("complainant_name", "[COMPLAINANT NAME]")
+    accused       = case_data.get("accused_name", "[ACCUSED NAME]")
+    court         = case_data.get("court_name", "the Hon'ble Court")
+    cheque_no     = case_data.get("cheque_number", "[CHEQUE NO]")
+    bank          = case_data.get("bank_name", "[BANK NAME]")
+    cheque_date   = case_data.get("cheque_date", "[CHEQUE DATE]")
+    amount        = case_data.get("cheque_amount", 0)
+    dis_date      = case_data.get("dishonour_date", "[DISHONOUR DATE]")
+    dis_reason    = case_data.get("dishonour_reason", "Insufficient Funds")
+    notice_date   = case_data.get("notice_date", "[NOTICE DATE]")
+    notice_served = case_data.get("notice_service_date", notice_date)
+    complaint_dt  = case_data.get("complaint_filed_date", date.today().isoformat())
+    debt_nature   = case_data.get("debt_nature", "legally enforceable debt")
+    jurisdiction  = case_data.get("jurisdiction", "[JURISDICTION]")
+    trans_date    = case_data.get("transaction_date", "")
+    coa_date      = case_data.get("cause_of_action_date", "")
+    is_company    = case_data.get("is_company_case", False)
+    directors     = case_data.get("directors_impleaded", False)
+    has_agreement = case_data.get("written_agreement_exists", False)
+    debt_nat_raw  = case_data.get("debt_nature", "loan")
+
+    amt_fmt  = "\u20b9{:,.2f}".format(float(amount)) if amount else "[AMOUNT]"
+    amt_2x   = "\u20b9{:,.2f}".format(float(amount) * 2) if amount else "[AMOUNT x2]"
+    year     = date.today().year
+
+    sug_all  = suggestion_data.get("suggestions", {}) if suggestion_data else {}
+    critical = sug_all.get("critical", [])
+    high     = sug_all.get("high", [])
+
+    sections = {}
+
+
+    sections["heading"] = (
+        "IN THE COURT OF " + court.upper() + "\n\n"
+        "COMPLAINT CASE NO. __________ / " + str(year) + "\n\n"
+        "COMPLAINANT:\n"
+        "    " + complainant + "\n\n"
+        "ACCUSED:\n"
+        "    " + accused + "\n\n"
+        "COMPLAINT UNDER SECTIONS 138"
+        + (", 141" if is_company else "")
+        + ", 142 OF THE NEGOTIABLE INSTRUMENTS ACT, 1881\n"
+        "READ WITH SECTION 200 OF THE CODE OF CRIMINAL PROCEDURE, 1973\n"
+    )
+
+
+    para_num = [1]
+
+    def p(text):
+        n = para_num[0]
+        para_num[0] += 1
+        return str(n) + ". " + text + "\n\n"
+
+    facts = ""
+    if trans_date:
+        facts += p(
+            "That on " + trans_date + ", the Accused approached the Complainant and "
+            "borrowed a sum of " + amt_fmt + " as a " + str(debt_nat_raw) + ". "
+            "The Complainant, having the financial capacity to advance the said sum, "
+            "duly paid the same to the Accused."
+            + (" The said transaction is evidenced by a written agreement / acknowledgement executed by the Accused." if has_agreement else "")
+        )
+    else:
+        facts += p(
+            "That the Accused was and is indebted to the Complainant in a sum of "
+            + amt_fmt + " towards " + debt_nature + "."
+        )
+
+    facts += p(
+        "That in discharge of the said legally enforceable liability and debt, "
+        "the Accused issued Cheque No. " + cheque_no + " dated " + cheque_date
+        + " drawn on " + bank + " for an amount of " + amt_fmt
+        + " in favour of the Complainant. "
+        "The said cheque was issued towards discharge of a legally enforceable debt "
+        "and liability of the Accused towards the Complainant."
+    )
+
+    facts += p(
+        "That the Complainant duly presented the said cheque for encashment through "
+        "his banker in the normal course of banking operations. The cheque was "
+        "returned/dishonoured by the drawee bank on " + dis_date
+        + " vide a return memo bearing the reason \"" + dis_reason + "\". "
+        "The said dishonour memo is in the possession of the Complainant and is "
+        "produced as Exhibit A."
+    )
+
+
+    facts += p(
+        "That upon dishonour of the said cheque, the Complainant caused a legal "
+        "notice under Section 138 of the Negotiable Instruments Act, 1881 to be "
+        "served upon the Accused by registered post with Acknowledgement Due on "
+        + notice_date + ", demanding payment of " + amt_fmt
+        + " within a period of fifteen (15) days from the date of receipt of the notice."
+    )
+
+    facts += p(
+        "That the said statutory notice was duly served upon the Accused"
+        + (" on " + notice_served if notice_served and notice_served != notice_date else "")
+        + ". Despite receipt of the said notice and expiry of the fifteen (15) day "
+        "period stipulated therein, the Accused has failed, neglected, and refused "
+        "to pay the said amount of " + amt_fmt + " or any part thereof to the Complainant. "
+        + ("The cause of action for the present complaint arose on " + coa_date + "." if coa_date else "")
+    )
+
+    sections["facts"] = facts.strip()
+
+
+    s141_text = ""
+    if is_company:
+        s141_text += p(
+            "That the Accused is a company incorporated under the Companies Act and "
+            "the cheque in question was issued by the company through its authorised "
+            "signatory. By virtue of Section 141 of the Negotiable Instruments Act, 1881, "
+            "every person who at the time the offence was committed was in charge of, "
+            "and was responsible to the company for the conduct of its business, "
+            "shall be deemed to be guilty of the offence."
+        )
+        if directors:
+            s141_text += p(
+                "That the directors/officers responsible for the day-to-day affairs of "
+                "the Accused-company are being impleaded herein with specific averments "
+                "regarding their role and responsibility in the issuance of the dishonoured cheque."
+            )
+
+    sections["section_141"] = s141_text.strip() if s141_text else ""
+
+
+    averments = ""
+    averments += p(
+        "That the cheque in question represents a legally enforceable debt and "
+        "liability of the Accused towards the Complainant. The presumption under "
+        "Section 139 of the Negotiable Instruments Act, 1881 squarely applies, "
+        "and the burden is upon the Accused to rebut the said presumption."
+    )
+
+    averments += p(
+        "That all the ingredients of the offence punishable under Section 138 of "
+        "the Negotiable Instruments Act, 1881 are satisfied in the present case:\n"
+        "   (i)   A cheque was drawn on a bank account for payment of a sum of money;\n"
+        "   (ii)  The cheque was issued towards discharge of a legally enforceable debt;\n"
+        "   (iii) The cheque was presented within three months of its date;\n"
+        "   (iv)  The cheque was returned by the drawee bank unpaid;\n"
+        "   (v)   A demand notice was served upon the Accused within 30 days of dishonour;\n"
+        "   (vi)  The Accused failed to pay within 15 days of receiving the notice."
+    )
+
+    averments += p(
+        "That the present complaint is being filed within the period of limitation "
+        "prescribed under Section 142 of the Negotiable Instruments Act, 1881, "
+        "i.e., within one month from the date the cause of action arose."
+    )
+
+    averments += p(
+        "That this Hon'ble Court has jurisdiction to try the present complaint as "
+        "the cheque was delivered for collection / presented for payment within "
+        "the territorial jurisdiction of this Court in " + jurisdiction + "."
+    )
+
+
+    sugs_ids = [s.get("id", "") for s in critical + high]
+    if "SG-H01" in sugs_ids or case_data.get("security_cheque_alleged"):
+        averments += p(
+            "That the Complainant specifically avers and states that the cheque in "
+            "question was NOT issued as a security cheque but was issued towards "
+            "discharge of a definite, crystallised, and legally enforceable liability "
+            "of the Accused towards the Complainant as of the date of issuance."
+        )
+
+    sections["averments"] = averments.strip()
+
+
+    sections["relief"] = (
+        "In view of the foregoing facts and circumstances, it is most respectfully "
+        "prayed that this Hon'ble Court may be pleased to:\n\n"
+        "   (a) Take cognizance of the offence punishable under Section 138"
+        + (", 141" if is_company else "")
+        + " of the Negotiable Instruments Act, 1881;\n\n"
+        "   (b) Issue process (summons) against the Accused and direct the "
+        "Accused to appear before this Hon'ble Court;\n\n"
+        "   (c) Upon trial, convict the Accused and sentence them to imprisonment "
+        "for a term which may extend to two years and/or fine which shall not be "
+        "less than the cheque amount i.e. " + amt_fmt + " and may extend to twice "
+        "the cheque amount i.e. " + amt_2x + ";\n\n"
+        "   (d) Direct the Accused to pay compensation of " + amt_fmt + " to the "
+        "Complainant under Section 357 of the Code of Criminal Procedure, 1973;\n\n"
+        "   (e) Grant interim compensation under Section 143A of the Negotiable "
+        "Instruments Act, 1881 pending trial;\n\n"
+        "   (f) Pass such other and further orders as this Hon'ble Court may deem "
+        "fit and proper in the interests of justice.\n"
+    )
+
+
+    sections["documents"] = (
+        "LIST OF DOCUMENTS\n\n"
+        "Exhibit A: Original dishonoured cheque and bank return memo.\n"
+        "Exhibit B: Copy of legal notice dated " + notice_date + ".\n"
+        "Exhibit C: Postal receipts and acknowledgement due (AD) card evidencing service.\n"
+        + ("Exhibit D: Written agreement / acknowledgement of debt.\n" if has_agreement else "")
+        + "Exhibit E: Bank statement of Complainant evidencing transaction.\n"
+    )
+
+
+    sections["verification"] = (
+        "VERIFICATION\n\n"
+        "I, " + complainant + ", the Complainant above named, do hereby solemnly verify "
+        "and declare that the contents of the above complaint are true and correct to "
+        "the best of my knowledge, information, and belief. Nothing material has been "
+        "concealed or misrepresented herein.\n\n"
+        "Verified at __________ on " + complaint_dt + ".\n\n"
+        "                                          COMPLAINANT\n"
+        "                                     (" + complainant + ")\n\n"
+        "Through Counsel:\n"
+        "Advocate: __________________________\n"
+        "Bar No.:  __________________________\n"
+        "Address:  __________________________\n"
+    )
+
+
+    full_text = sections["heading"] + "\n"
+    full_text += "FACTS OF THE CASE\n\n" + sections["facts"] + "\n\n"
+    if sections["section_141"]:
+        full_text += "AVERMENTS UNDER SECTION 141 NI ACT\n\n" + sections["section_141"] + "\n\n"
+    full_text += "LEGAL AVERMENTS\n\n" + sections["averments"] + "\n\n"
+    full_text += "PRAYER\n\n" + sections["relief"] + "\n"
+    full_text += sections["documents"] + "\n"
+    full_text += sections["verification"]
+
+    return {"full_text": full_text, "sections": sections}
+
+
 @app.post("/generate-draft")
 async def generate_draft(request: Request):
     """
@@ -18297,6 +18849,563 @@ def _build_complaint_draft(case_data: dict) -> dict:
 
     return {"full_text": full_text, "sections": sections}
 
+@app.post("/admin/create-account")
+async def create_admin_account(request: Request):
+    """
+    Create a new admin account.
+    Requires an existing super_admin to authorize creation.
+    Body: { authorizer_email, authorizer_password, new_email, new_password, new_name, role }
+    """
+    try:
+        data = await request.json()
+        auth_email = data.get('authorizer_email', '')
+        auth_pw    = data.get('authorizer_password', '')
+        new_email  = data.get('new_email', '').strip().lower()
+        new_pw     = data.get('new_password', '')
+        new_name   = data.get('new_name', '').strip()
+        role       = data.get('role', 'admin')
+
+        if not verify_admin(auth_email, auth_pw):
+            return {'success': False, 'error': 'Unauthorized — invalid authorizer credentials'}
+
+        if ADMIN_CREDENTIALS.get(auth_email, {}).get('role') != 'super_admin':
+            return {'success': False, 'error': 'Only super_admin can create new admin accounts'}
+
+        if not new_email or not new_pw or not new_name:
+            return {'success': False, 'error': 'new_email, new_password, and new_name are required'}
+
+        if len(new_pw) < 8:
+            return {'success': False, 'error': 'Password must be at least 8 characters'}
+
+        if new_email in ADMIN_CREDENTIALS:
+            return {'success': False, 'error': 'An admin account with this email already exists'}
+
+        import hashlib as _hl
+        pw_hash = _hl.sha256(new_pw.encode()).hexdigest()
+
+        ADMIN_CREDENTIALS[new_email] = {
+            'password_hash': pw_hash,
+            'name': new_name,
+            'role': role
+        }
+
+        try:
+            _conn = get_db_connection()
+            _cur = _conn.cursor()
+            _cur.execute("""
+                INSERT OR REPLACE INTO admin_accounts (email, name, role, password_hash, created_by)
+                VALUES (?, ?, ?, ?, ?)
+            """, (new_email, new_name, role, pw_hash, auth_email))
+            _conn.commit()
+            _conn.close()
+        except Exception as _db_e:
+            logger.warning(f"Could not persist admin to DB: {_db_e}")
+
+        log_admin_action(auth_email, 'CREATE_ADMIN', new_email,
+                         f'Created new {role} account: {new_name}')
+
+        logger.info(f'New admin account created: {new_email} (role={role}) by {auth_email}')
+
+        return {
+            'success': True,
+            'message': f'Admin account created for {new_email}',
+            'admin': {'email': new_email, 'name': new_name, 'role': role}
+        }
+
+    except Exception as e:
+        logger.error(f'Admin account creation error: {e}')
+        return {'success': False, 'error': str(e)}
+
+
+@app.post("/admin/login")
+
+async def admin_login(request: Request):
+    """Admin authentication endpoint"""
+    try:
+        data = await request.json()
+        email = data.get('email', '')
+        password = data.get('password', '')
+
+        if verify_admin(email, password):
+            log_admin_action(email, "LOGIN", None, "Successful admin login")
+            return {
+                'success': True,
+                'admin': {
+                    'email': email,
+                    'name': ADMIN_CREDENTIALS[email]['name'],
+                    'role': ADMIN_CREDENTIALS[email]['role']
+                }
+            }
+        else:
+            return {
+                'success': False,
+                'error': 'Invalid admin credentials'
+            }
+    except Exception as e:
+        logger.error(f"Admin login error: {e}")
+        return {'success': False, 'error': str(e)}
+
+@app.post("/admin/create-account")
+async def admin_create_account(request: Request):
+    """
+    Register a new admin account.
+    Requires super-admin authorization.
+    """
+    try:
+        data = await request.json()
+        
+        # Super-admin authorization (frontend sends these fields)
+        auth_email = data.get('authorizer_email', '')
+        auth_password = data.get('authorizer_password', '')
+        
+        # Check if Firebase-verified (special case)
+        is_firebase_verified = auth_password == 'FIREBASE_VERIFIED' and auth_email == 'masteradmin@judiq.com'
+        
+        if not is_firebase_verified:
+            # Verify super-admin normally
+            if not verify_admin(auth_email, auth_password):
+                return {
+                    'success': False,
+                    'error': 'Invalid super-admin credentials'
+                }
+            
+            if ADMIN_CREDENTIALS.get(auth_email, {}).get('role') != 'super_admin':
+                return {
+                    'success': False,
+                    'error': 'Only super-admins can register new admin accounts'
+                }
+        else:
+            # Firebase verified - allow registration
+            logger.info(f"✅ Firebase-verified registration request from {auth_email}")
+        
+        # New admin details (matching frontend field names)
+        new_email = data.get('new_email', '').strip().lower()
+        new_name = data.get('new_name', '').strip()
+        new_password = data.get('new_password', '')
+        new_role = data.get('role', 'admin')
+
+        # Validation
+        if not new_email or not new_name or not new_password:
+            return {'success': False, 'error': 'Email, name, and password are required'}
+        if len(new_password) < 8:
+            return {'success': False, 'error': 'Password must be at least 8 characters long'}
+        if new_email in ADMIN_CREDENTIALS:
+            return {'success': False, 'error': 'An admin account with this email already exists'}
+
+        import hashlib
+        password_hash = hashlib.sha256(new_password.encode()).hexdigest()
+
+        # Save to in-memory credentials
+        ADMIN_CREDENTIALS[new_email] = {
+            'password_hash': password_hash,
+            'name': new_name,
+            'role': new_role
+        }
+        log_admin_action(auth_email, "REGISTER_ADMIN", new_email, f"Registered new {new_role}: {new_name}")
+        logger.info(f"New admin registered: {new_email} ({new_role}) by {auth_email}")
+
+        return {
+            'success': True,
+            'message': f'Admin account created for {new_email}',
+            'admin': {'email': new_email, 'name': new_name, 'role': new_role}
+        }
+
+    except Exception as e:
+        logger.error(f'Admin account creation error: {e}')
+        return {'success': False, 'error': str(e)}
+
+
+@app.post("/admin/create-account-open")
+async def admin_create_account_open(request: Request):
+    """
+    TEMPORARY: Open admin registration for initial setup.
+    No authorization required - anyone can create first admin accounts.
+    """
+    try:
+        data = await request.json()
+        
+        logger.info("⚠️ Open admin registration attempt")
+        
+        # New admin details
+        new_email = data.get('new_email', '').strip().lower()
+        new_name = data.get('new_name', '').strip()
+        new_password = data.get('new_password', '')
+        new_role = data.get('role', 'admin')
+        
+        # Validation
+        if not new_email or not new_name or not new_password:
+            return {
+                'success': False,
+                'error': 'Email, name, and password are required'
+            }
+        
+        if len(new_password) < 8:
+            return {
+                'success': False,
+                'error': 'Password must be at least 8 characters long'
+            }
+        
+        if new_email in ADMIN_CREDENTIALS:
+            return {
+                'success': False,
+                'error': 'An admin account with this email already exists'
+            }
+        
+        # Hash password
+        import hashlib
+        password_hash = hashlib.sha256(new_password.encode()).hexdigest()
+        
+        # Save to database FIRST
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO admin_accounts (email, name, role, password_hash, created_by)
+                VALUES (?, ?, ?, ?, ?)
+            """, (new_email, new_name, new_role, password_hash, auth_email))
+            conn.commit()
+            conn.close()
+        except sqlite3.IntegrityError:
+            return {
+                'success': False,
+                'error': 'An admin account with this email already exists in database'
+            }
+        except Exception as db_err:
+            logger.error(f"Database error creating admin: {db_err}")
+            return {
+                'success': False,
+                'error': f'Database error: {str(db_err)}'
+            }
+        
+        # Add to ADMIN_CREDENTIALS (in-memory)
+        ADMIN_CREDENTIALS[new_email] = {
+            'password_hash': password_hash,
+            'name': new_name,
+            'role': new_role
+        }
+        
+        # Log the action
+        log_admin_action(auth_email, "REGISTER_ADMIN", new_email, f"Registered new {new_role}: {new_name}")
+        
+        logger.info(f"✅ New admin registered: {new_email} ({new_role}) by {auth_email}")
+        
+        return {
+            'success': True,
+            'message': f'Admin account created successfully for {new_email}',
+            'admin': {
+                'email': new_email,
+                'name': new_name,
+                'role': new_role
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Admin registration error: {e}")
+        return {'success': False, 'error': str(e)}
+
+@app.post("/admin/create-account-open")
+async def admin_create_account_open(request: Request):
+    """
+    TEMPORARY: Open admin registration for initial setup.
+    No authorization required - anyone can create first admin accounts.
+    DELETE THIS ENDPOINT after creating your admin account!
+    """
+    try:
+        data = await request.json()
+        
+        logger.warning("⚠️ OPEN admin registration attempt - this endpoint should be disabled after setup!")
+        
+        # New admin details
+        new_email = data.get('new_email', '').strip().lower()
+        new_name = data.get('new_name', '').strip()
+        new_password = data.get('new_password', '')
+        new_role = data.get('role', 'admin')
+        
+        # Validation
+        if not new_email or not new_name or not new_password:
+            return {
+                'success': False,
+                'error': 'Email, name, and password are required'
+            }
+        
+        if len(new_password) < 8:
+            return {
+                'success': False,
+                'error': 'Password must be at least 8 characters long'
+            }
+        
+        if new_email in ADMIN_CREDENTIALS:
+            return {
+                'success': False,
+                'error': 'An admin account with this email already exists'
+            }
+        
+        # Hash password
+        import hashlib
+        password_hash = hashlib.sha256(new_password.encode()).hexdigest()
+        
+        # Save to database
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO admin_accounts (email, name, role, password_hash, created_by)
+                VALUES (?, ?, ?, ?, ?)
+            """, (new_email, new_name, new_role, password_hash, 'OPEN_REGISTRATION'))
+            conn.commit()
+            conn.close()
+        except sqlite3.IntegrityError:
+            return {
+                'success': False,
+                'error': 'An admin account with this email already exists in database'
+            }
+        except Exception as db_err:
+            logger.error(f"Database error creating admin: {db_err}")
+            return {
+                'success': False,
+                'error': f'Database error: {str(db_err)}'
+            }
+        
+        # Add to ADMIN_CREDENTIALS (in-memory)
+        ADMIN_CREDENTIALS[new_email] = {
+            'password_hash': password_hash,
+            'name': new_name,
+            'role': new_role
+        }
+        
+        # Log the action
+        log_admin_action('SYSTEM', "OPEN_REGISTRATION", new_email, f"Registered via open endpoint: {new_name} ({new_role})")
+        
+        logger.info(f"✅ Admin registered via OPEN endpoint: {new_email} ({new_role})")
+        logger.warning("🚨 Remember to disable /admin/create-account-open endpoint after setup!")
+        
+        return {
+            'success': True,
+            'message': f'Admin account created successfully for {new_email}',
+            'admin': {
+                'email': new_email,
+                'name': new_name,
+                'role': new_role
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Open admin registration error: {e}")
+        return {'success': False, 'error': str(e)}
+
+@app.get("/admin/users")
+async def get_all_users(admin_email: str):
+    """Get all users with their usage stats"""
+    if admin_email not in ADMIN_CREDENTIALS:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+
+        cursor.execute('''
+            SELECT
+                user_email,
+                COUNT(*) as total_analyses,
+                MAX(analysis_timestamp) as last_analysis,
+                MIN(analysis_timestamp) as first_analysis
+            FROM case_analyses
+            WHERE user_email IS NOT NULL AND user_email != ''
+            GROUP BY user_email
+            ORDER BY total_analyses DESC
+        ''')
+
+        users = []
+        for row in cursor.fetchall():
+            user_email = row[0]
+
+
+            cursor.execute('''
+                SELECT COUNT(*) FROM case_analyses
+                WHERE user_email = ? AND DATE(analysis_timestamp) = DATE('now')
+            ''', (user_email,))
+            today_count = cursor.fetchone()[0]
+
+
+            cursor.execute('''
+                SELECT daily_limit, is_unlimited, custom_limit_reason
+                FROM user_limits WHERE user_email = ?
+            ''', (user_email,))
+            limit_info = cursor.fetchone()
+
+            users.append({
+                'email': user_email,
+                'total_analyses': row[1],
+                'last_analysis': row[2],
+                'first_analysis': row[3],
+                'today_usage': today_count,
+                'daily_limit': limit_info[0] if limit_info else 3,
+                'is_unlimited': bool(limit_info[1]) if limit_info else False,
+                'limit_reason': limit_info[2] if limit_info else None
+            })
+
+        conn.close()
+
+        log_admin_action(admin_email, "VIEW_USERS", None, f"Viewed {len(users)} users")
+
+        return {
+            'success': True,
+            'users': users,
+            'total_users': len(users)
+        }
+    except Exception as e:
+        logger.error(f"Error getting users: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/admin/set-user-limit")
+async def set_user_limit(request: Request):
+    """Set custom daily limit for a user"""
+    try:
+        data = await request.json()
+        admin_email = data.get('admin_email')
+        user_email = data.get('user_email')
+        daily_limit = data.get('daily_limit', 3)
+        is_unlimited = data.get('is_unlimited', False)
+        reason = data.get('reason', '')
+
+        if admin_email not in ADMIN_CREDENTIALS:
+            raise HTTPException(status_code=403, detail="Admin access required")
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+
+        cursor.execute('''
+            INSERT INTO user_limits (user_email, daily_limit, is_unlimited, custom_limit_reason, set_by_admin)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(user_email) DO UPDATE SET
+                daily_limit = excluded.daily_limit,
+                is_unlimited = excluded.is_unlimited,
+                custom_limit_reason = excluded.custom_limit_reason,
+                set_by_admin = excluded.set_by_admin,
+                updated_at = CURRENT_TIMESTAMP
+        ''', (user_email, daily_limit, 1 if is_unlimited else 0, reason, admin_email))
+
+        conn.commit()
+        conn.close()
+
+        limit_text = "UNLIMITED" if is_unlimited else f"{daily_limit}/day"
+        log_admin_action(admin_email, "SET_LIMIT", user_email, f"Set limit to {limit_text}: {reason}")
+
+        return {
+            'success': True,
+            'message': f"Limit set to {limit_text} for {user_email}"
+        }
+    except Exception as e:
+        logger.error(f"Error setting user limit: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/admin/analytics")
+async def get_admin_analytics(admin_email: str):
+    """Get comprehensive analytics for admin dashboard"""
+    if admin_email not in ADMIN_CREDENTIALS:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+
+        cursor.execute("SELECT COUNT(*) FROM case_analyses")
+        total_analyses = cursor.fetchone()[0]
+
+
+        cursor.execute("SELECT COUNT(DISTINCT user_email) FROM case_analyses WHERE user_email IS NOT NULL")
+        total_users = cursor.fetchone()[0]
+
+
+        cursor.execute("SELECT COUNT(*) FROM case_analyses WHERE DATE(analysis_timestamp) = DATE('now')")
+        today_analyses = cursor.fetchone()[0]
+
+
+        cursor.execute("SELECT COUNT(*) FROM case_analyses WHERE DATE(analysis_timestamp) >= DATE('now', '-7 days')")
+        week_analyses = cursor.fetchone()[0]
+
+
+        cursor.execute("SELECT COUNT(*) FROM case_analyses WHERE DATE(analysis_timestamp) >= DATE('now', '-30 days')")
+        month_analyses = cursor.fetchone()[0]
+
+
+        cursor.execute('''
+            SELECT DATE(analysis_timestamp) as date, COUNT(*) as count
+            FROM case_analyses
+            WHERE DATE(analysis_timestamp) >= DATE('now', '-30 days')
+            GROUP BY DATE(analysis_timestamp)
+            ORDER BY date DESC
+        ''')
+        daily_stats = [{'date': row[0], 'count': row[1]} for row in cursor.fetchall()]
+
+
+        cursor.execute('''
+            SELECT user_email, COUNT(*) as count
+            FROM case_analyses
+            WHERE user_email IS NOT NULL
+            GROUP BY user_email
+            ORDER BY count DESC
+            LIMIT 10
+        ''')
+        top_users = [{'email': row[0], 'count': row[1]} for row in cursor.fetchall()]
+
+
+        cursor.execute('''
+            SELECT user_email, COUNT(*) as count
+            FROM case_analyses
+            WHERE DATE(analysis_timestamp) = DATE('now')
+            GROUP BY user_email
+            HAVING count >= 3
+        ''')
+        limit_reached = [{'email': row[0], 'count': row[1]} for row in cursor.fetchall()]
+
+
+        cursor.execute("SELECT AVG(overall_risk_score) FROM case_analyses WHERE overall_risk_score IS NOT NULL")
+        avg_score_result = cursor.fetchone()[0]
+        avg_score = round(float(avg_score_result), 1) if avg_score_result else 0
+
+
+        cursor.execute('''
+            SELECT
+                CASE
+                    WHEN overall_risk_score >= 70 THEN 'Strong'
+                    WHEN overall_risk_score >= 40 THEN 'Moderate'
+                    ELSE 'Weak'
+                END as category,
+                COUNT(*) as count
+            FROM case_analyses
+            WHERE overall_risk_score IS NOT NULL
+            GROUP BY category
+        ''')
+        score_distribution = {row[0]: row[1] for row in cursor.fetchall()}
+
+        conn.close()
+
+        log_admin_action(admin_email, "VIEW_ANALYTICS", None, "Viewed analytics dashboard")
+
+        return {
+            'success': True,
+            'analytics': {
+                'total_analyses': total_analyses,
+                'total_users': total_users,
+                'today_analyses': today_analyses,
+                'week_analyses': week_analyses,
+                'month_analyses': month_analyses,
+                'avg_score': avg_score,
+                'score_distribution': score_distribution,
+                'daily_stats': daily_stats,
+                'top_users': top_users,
+                'limit_reached_today': limit_reached
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error getting analytics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/user/case-history/{user_email}")
 async def get_user_case_history(user_email: str):
     """Get case history for specific user"""
@@ -18353,6 +19462,104 @@ async def get_user_case_history(user_email: str):
     except Exception as e:
         logger.error(f"Error getting case history: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/admin/all-analyses")
+async def get_all_analyses(admin_email: str, limit: int = 100, offset: int = 0):
+    """Get all analyses with full details"""
+    if admin_email not in ADMIN_CREDENTIALS:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT
+                case_id,
+                analysis_timestamp,
+                user_email,
+                case_type,
+                cheque_amount,
+                overall_risk_score,
+                compliance_level,
+                fatal_defect_override,
+                analysis_json
+            FROM case_analyses
+            ORDER BY analysis_timestamp DESC
+            LIMIT ? OFFSET ?
+        ''', (limit, offset))
+
+        analyses = []
+        for row in cursor.fetchall():
+            analysis_json = json.loads(row[8]) if row[8] else {}
+            analyses.append({
+                'case_id': row[0],
+                'timestamp': row[1],
+                'user_email': row[2],
+                'case_type': row[3],
+                'cheque_amount': row[4],
+                'score': row[5],
+                'compliance_level': row[6],
+                'is_fatal': bool(row[7]),
+                'full_analysis': analysis_json
+            })
+
+
+        cursor.execute("SELECT COUNT(*) FROM case_analyses")
+        total_count = cursor.fetchone()[0]
+
+        conn.close()
+
+        log_admin_action(admin_email, "VIEW_ALL_ANALYSES", None, f"Viewed {len(analyses)} analyses (offset {offset})")
+
+        return {
+            'success': True,
+            'analyses': analyses,
+            'total_count': total_count,
+            'limit': limit,
+            'offset': offset
+        }
+    except Exception as e:
+        logger.error(f"Error getting all analyses: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/admin/activity-log")
+async def get_admin_activity_log(admin_email: str, limit: int = 50):
+    """Get admin activity log"""
+    if admin_email not in ADMIN_CREDENTIALS:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT admin_email, action_type, target_user, action_details, timestamp
+            FROM admin_activity_log
+            ORDER BY timestamp DESC
+            LIMIT ?
+        ''', (limit,))
+
+        activities = []
+        for row in cursor.fetchall():
+            activities.append({
+                'admin': row[0],
+                'action': row[1],
+                'target': row[2],
+                'details': row[3],
+                'timestamp': row[4]
+            })
+
+        conn.close()
+
+        return {
+            'success': True,
+            'activities': activities
+        }
+    except Exception as e:
+        logger.error(f"Error getting activity log: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     main()
@@ -18592,3 +19799,239 @@ def format_concise_output(analysis: Dict) -> str:
 
     lines.append("═" * 50)
     return "\n".join(lines)
+
+
+# ============================================================================
+# FLASK API SERVER WITH FIREBASE INTEGRATION
+# ============================================================================
+
+try:
+    from flask import Flask, request, jsonify
+    from flask_cors import CORS
+    FLASK_AVAILABLE = True
+except ImportError:
+    FLASK_AVAILABLE = False
+    print("Flask not available - API server disabled")
+
+try:
+    import firebase_admin
+    from firebase_admin import credentials, auth, firestore
+    FIREBASE_AVAILABLE = True
+except ImportError:
+    FIREBASE_AVAILABLE = False
+    print("Firebase Admin SDK not available - Firebase features disabled")
+
+
+def create_app():
+    """Create and configure Flask application"""
+    if not FLASK_AVAILABLE:
+        raise ImportError("Flask not installed. Run: pip install flask flask-cors")
+    
+    app = Flask(__name__)
+    CORS(app, resources={
+        r"/*": {
+            "origins": "*",
+            "methods": ["GET", "POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization"]
+        }
+    })
+    
+    # Initialize Firebase
+    db = None
+    if FIREBASE_AVAILABLE:
+        try:
+            if not firebase_admin._apps:
+                service_account_path = os.environ.get('FIREBASE_SERVICE_ACCOUNT', 'firebase-service-account.json')
+                if os.path.exists(service_account_path):
+                    cred = credentials.Certificate(service_account_path)
+                    firebase_admin.initialize_app(cred)
+                    db = firestore.client()
+                    logger.info("Firebase initialized successfully")
+                else:
+                    logger.warning("Firebase service account not found - running without Firebase")
+        except Exception as e:
+            logger.error(f"Firebase initialization error: {e}")
+    
+    # ============================================================================
+    # API ENDPOINTS
+    # ============================================================================
+    
+    @app.route('/api/analyze', methods=['POST', 'OPTIONS'])
+    def analyze_case():
+        """Main analysis endpoint"""
+        if request.method == 'OPTIONS':
+            return '', 204
+        
+        try:
+            case_data = request.get_json()
+            if not case_data:
+                return jsonify({
+                    'success': False,
+                    'error': 'No case data provided',
+                    'user_friendly_message': 'Please provide case data for analysis'
+                }), 400
+            
+            # Run analysis
+            logger.info("Running analysis...")
+            analysis_result = run_complete_analysis(case_data)
+            
+            # Generate case ID
+            if 'case_id' not in analysis_result:
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                analysis_result['case_id'] = f"CASE_{timestamp}"
+            
+            # Save to Firebase if available
+            user_email = case_data.get('user_email')
+            if db and user_email:
+                try:
+                    # Save analysis
+                    doc_ref = db.collection('analyses').document(analysis_result['case_id'])
+                    doc_ref.set({
+                        'case_id': analysis_result['case_id'],
+                        'user_email': user_email,
+                        'timestamp': firestore.SERVER_TIMESTAMP,
+                        'case_data': case_data,
+                        'analysis': analysis_result,
+                        'score': analysis_result.get('modules', {}).get('risk_assessment', {}).get('overall_risk_score', 0),
+                        'is_fatal': analysis_result.get('fatal_flag', False)
+                    })
+                    
+                    # Update user stats
+                    user_ref = db.collection('users').document(user_email)
+                    user_ref.set({
+                        'email': user_email,
+                        'last_analysis': firestore.SERVER_TIMESTAMP,
+                        'total_analyses': firestore.Increment(1)
+                    }, merge=True)
+                    
+                    logger.info(f"Saved analysis to Firebase: {analysis_result['case_id']}")
+                except Exception as e:
+                    logger.error(f"Firebase save error: {e}")
+            
+            return jsonify({
+                'success': True,
+                'analysis': analysis_result,
+                'engine_version': ENGINE_VERSION,
+                'timestamp': datetime.now().isoformat()
+            }), 200
+            
+        except Exception as e:
+            logger.error(f"Analysis error: {e}")
+            logger.error(traceback.format_exc())
+            return jsonify({
+                'success': False,
+                'error': str(e),
+                'user_friendly_message': 'Analysis failed. Please check your input data and try again.'
+            }), 500
+    
+    @app.route('/api/user/case-history/<email>', methods=['GET', 'OPTIONS'])
+    def get_case_history(email):
+        """Get user's case history"""
+        if request.method == 'OPTIONS':
+            return '', 204
+        
+        if not db:
+            return jsonify({'success': False, 'error': 'Firebase not available'}), 503
+        
+        try:
+            # Query user's analyses
+            analyses_ref = db.collection('analyses').where('user_email', '==', email).order_by('timestamp', direction=firestore.Query.DESCENDING).limit(50)
+            docs = analyses_ref.stream()
+            
+            history = []
+            for doc in docs:
+                data = doc.to_dict()
+                history.append({
+                    'case_id': data.get('case_id'),
+                    'date': data.get('timestamp'),
+                    'score': data.get('score', 0),
+                    'is_fatal': data.get('is_fatal', False),
+                    'case_type': data.get('case_data', {}).get('case_type', 'Section 138 NI Act'),
+                    'amount': data.get('case_data', {}).get('cheque_amount', 0),
+                    'key_issue': data.get('analysis', {}).get('decisive_verdict', '')[:100]
+                })
+            
+            return jsonify({
+                'success': True,
+                'history': history,
+                'count': len(history)
+            }), 200
+            
+        except Exception as e:
+            logger.error(f"History fetch error: {e}")
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+    
+    @app.route('/api/user/usage/<email>', methods=['GET', 'OPTIONS'])
+    def get_usage_quota(email):
+        """Get user's usage quota"""
+        if request.method == 'OPTIONS':
+            return '', 204
+        
+        if not db:
+            return jsonify({'success': False, 'error': 'Firebase not available'}), 503
+        
+        try:
+            user_ref = db.collection('users').document(email)
+            user_doc = user_ref.get()
+            
+            if user_doc.exists:
+                data = user_doc.to_dict()
+                return jsonify({
+                    'success': True,
+                    'total_analyses': data.get('total_analyses', 0),
+                    'quota_limit': 100,  # Default quota
+                    'remaining': 100 - data.get('total_analyses', 0)
+                }), 200
+            else:
+                return jsonify({
+                    'success': True,
+                    'total_analyses': 0,
+                    'quota_limit': 100,
+                    'remaining': 100
+                }), 200
+                
+        except Exception as e:
+            logger.error(f"Usage fetch error: {e}")
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+    
+    @app.route('/api/health', methods=['GET'])
+    def health_check():
+        """Health check endpoint"""
+        return jsonify({
+            'status': 'healthy',
+            'engine_version': ENGINE_VERSION,
+            'firebase_enabled': db is not None,
+            'timestamp': datetime.now().isoformat()
+        }), 200
+    
+    return app
+
+
+if __name__ == '__main__':
+    if FLASK_AVAILABLE:
+        app = create_app()
+        print(f"""
+╔════════════════════════════════════════════════════════════════╗
+║                     JUDIQ AI API SERVER                        ║
+║                  Legal Analysis Engine {ENGINE_VERSION}                 ║
+╚════════════════════════════════════════════════════════════════╝
+
+Server starting on http://localhost:5000
+API Endpoints:
+  POST   /api/analyze              - Run case analysis
+  GET    /api/user/case-history/<email> - Get case history
+  GET    /api/user/usage/<email>   - Get usage quota
+  GET    /api/health               - Health check
+
+Press CTRL+C to stop
+""")
+        app.run(host='0.0.0.0', port=5000, debug=True)
+    else:
+        print("ERROR: Flask not installed. Install with: pip install flask flask-cors")
+        print("Optional: pip install firebase-admin (for Firebase features)")
