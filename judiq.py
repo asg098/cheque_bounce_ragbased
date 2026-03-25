@@ -50,40 +50,6 @@ def indian_number_format(amount: float) -> str:
     return result
 
 
-def clean_missing_text(text: str) -> str:
-    """
-    Clean up 'Missing Missing' patterns and convert 'Missing X' to proper format.
-    This ensures no duplicate 'Missing' words appear in the output.
-    """
-    if not text or not isinstance(text, str):
-        return str(text) if text else ''
-    
-    # First pass: Remove all "Missing Missing..." patterns recursively
-    while 'Missing Missing' in text:
-        text = text.replace('Missing Missing', 'Missing')
-    
-    # Second pass: Convert "Missing X" to "No X available"
-    if text.strip().startswith('Missing '):
-        text = 'No ' + text.strip()[8:] + ' available'
-    
-    # Third pass: Remove any remaining standalone "Missing" words
-    text = text.replace(' Missing ', ' ')
-    
-    # Fourth pass: Clean up if "Missing" appears at start/end
-    text = text.strip()
-    if text == 'Missing':
-        text = 'Not available'
-    elif text.startswith('Missing'):
-        text = text[7:].strip()
-    elif text.endswith('Missing'):
-        text = text[:-7].strip()
-    
-    # Remove excessive dashes and whitespace
-    text = text.strip(' -—').strip()
-    
-    return text
-
-
 def add_calendar_months(start_date, months: int):
 
     if isinstance(start_date, str):
@@ -8588,7 +8554,13 @@ def generate_executive_summary(
         s = _n(data.get('score') if isinstance(data, dict) else data)
         if s < 60:
             reason = (data.get('reason', '') or '') if isinstance(data, dict) else ''
-            reason = clean_missing_text(reason)
+            # Clean up any "Missing" text in reason to prevent duplication
+            # Handle: "Missing Missing X", "Missing X", "- Missing X", etc.
+            reason = reason.replace('Missing Missing', '').replace('Missing', '').strip()
+            # Remove leading/trailing dashes and whitespace
+            reason = reason.strip(' -—').strip()
+            # Clean up duplicate spaces
+            reason = ' '.join(reason.split())
             weaknesses.append(
                 f"{cat}: {s}/100 — {reason or 'Insufficient — strengthen documentary evidence before filing'} ❌"
             )
@@ -9634,7 +9606,12 @@ def generate_clean_professional_report(analysis: Dict, case_data: Dict) -> Dict:
         s = _safe_score(data.get('score') if isinstance(data, dict) else data)
         if s < 60:
             reason = data.get('reason', '') if isinstance(data, dict) else ''
-            reason = clean_missing_text(reason)
+            # Clean up any "Missing" text in reason to prevent duplication
+            # Handle: "Missing Missing X", "Missing X", "- Missing X", etc.
+            reason = str(reason).replace('Missing Missing', '').replace('Missing', '').strip()
+            reason = reason.strip(' -—').strip()
+            # Clean up duplicate spaces
+            reason = ' '.join(reason.split())
             weaknesses.append(f"{cat}: {s}/100 — {_safe(reason, 'Insufficient — strengthen documentary evidence before filing')}")
     if not case_data.get('written_agreement_exists'):
         weaknesses.append("No documentary proof of legally enforceable debt — accused can challenge the fundamental Section 138 ingredient")
