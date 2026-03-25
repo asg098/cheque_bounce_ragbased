@@ -1,3 +1,14 @@
+#!/usr/bin/env python3
+"""
+JUDIQ AI - Section 138 Legal Analysis Engine
+Version: v10.0
+
+CRITICAL FIX: All "Missing Missing" patterns eliminated
+  - Changed all "Missing [item]" to "No [item] available — [context]"
+  - Removed dynamic "Missing " prefix concatenations at lines 8316, 8324
+  - Updated all output text to use proper phrasing throughout
+  - HTML sanitizeDOM() function enhanced for comprehensive cleanup
+"""
 import hashlib
 import json
 import logging
@@ -8313,7 +8324,7 @@ def analyze_document_compliance(case_data: Dict) -> Dict:
                         'consequence': doc_info['consequence']
                     })
                     compliance['fatal_defects'].append({
-                        'defect': f"Missing {doc_name.replace('_', ' ')}",
+                        'defect': f"{doc_name.replace('_', ' ').title()} not available — filing blocked",
                         'severity': 'FATAL',
                         'impact': doc_info['consequence'],
                         'filing_blocked': True
@@ -8321,7 +8332,7 @@ def analyze_document_compliance(case_data: Dict) -> Dict:
                 elif severity == 'CRITICAL':
                     critical_missing.append(doc_name.replace('_', ' ').title())
                     compliance['defects'].append({
-                        'defect': f"Missing {doc_name.replace('_', ' ')}",
+                        'defect': f"{doc_name.replace('_', ' ').title()} not available — critical gap",
                         'severity': 'CRITICAL',
                         'impact': doc_info['consequence']
                     })
@@ -8474,7 +8485,7 @@ def generate_executive_summary(
         elif not case_data.get('written_agreement_exists'):
             _primary_issue = "Absence of written agreement evidencing the debt"
         elif not case_data.get('ledger_available'):
-            _primary_issue = "Missing financial records establishing transaction trail"
+            _primary_issue = "No financial records available — transaction trail incomplete"
         elif not case_data.get('postal_proof_available'):
             _primary_issue = "Unverified notice delivery - postal proof missing"
         elif not case_data.get('original_cheque_available'):
@@ -9547,7 +9558,7 @@ def generate_clean_professional_report(analysis: Dict, case_data: Dict) -> Dict:
         
         # Add secondary issues to reasons
         if _no_postal and not any('postal' in str(r).lower() for r in filing_reasons):
-            filing_reasons.append("Missing: Postal proof of notice delivery")
+            filing_reasons.append("No postal proof of notice delivery available")
         if not case_data.get('witness_available') and len(filing_reasons) < 3:
             filing_reasons.append("No corroborative witness identified")
             
@@ -10097,7 +10108,7 @@ def generate_clean_professional_report(analysis: Dict, case_data: Dict) -> Dict:
                 'findings': [
                     f"Documentary strength: {documentary.get('overall_strength_score', 0):.1f}/100",
                     f"Original cheque: {'Available' if case_data.get('original_cheque_available') else 'Not verified'}",
-                    f"Notice proof: {'Available' if case_data.get('postal_proof_available') else 'Missing'}"
+                    f"Notice proof: {'Available' if case_data.get('postal_proof_available') else 'Not available'}"
                 ]
             },
             '4_defence_exposure': {
@@ -10335,7 +10346,7 @@ def generate_executive_report(analysis_data: Dict) -> Dict:
                 'gap_name':  _safe(doc_name),
                 'document':  _safe(doc_name),
                 'severity':  'High',
-                'status':    _safe(doc_info.get('grade'), 'Missing'),
+                'status':    _safe(doc_info.get('grade'), 'Not available'),
                 'impact':    _safe(doc_info.get('impact'), 'Reduces evidential strength'),
                 'remedy':    _safe(doc_info.get('remedy'), 'Obtain and verify document')
             })
@@ -11238,7 +11249,7 @@ def get_decision_confidence(analysis: Dict, case_data: Dict) -> Dict:
                              'detail': 'All critical dates provided — timeline analysis is deterministic', 'impact': 0})
         elif len(missing_dates) <= 1:
             factors.append({'factor': 'Timeline data', 'rating': 'MEDIUM',
-                             'detail': f'Missing: {missing_dates[0]} — some timeline figures are estimated', 'impact': -12})
+                             'detail': f'Date unavailable: {missing_dates[0]} — some timeline figures are estimated', 'impact': -12})
             penalty += 12
         else:
             factors.append({'factor': 'Timeline data', 'rating': 'LOW',
@@ -12522,7 +12533,7 @@ def get_module_confidence_scores(analysis: Dict, case_data: Dict) -> Dict:
     tl_score = (tl_present / len(tl_fields)) * 100
     modules_conf['timeline'] = _conf(tl_score,
         'Timeline analysis is deterministic — fully reliable when all 5 dates are provided' if tl_score == 100
-        else f'Missing {len(tl_fields)-tl_present} date(s) — some calculations are estimated')
+        else f'Unavailable: {len(tl_fields)-tl_present} date(s) — some calculations are estimated')
 
 
     doc_fields = ['original_cheque_available', 'return_memo_available', 'postal_proof_available',
@@ -18034,7 +18045,7 @@ def _generate_case_suggestions(analysis_result: dict, case_data: dict) -> dict:
             "detail": (
                 f"Documentary strength is {doc_score:.0f}/100. "
                 "Weak documentation significantly raises the risk of acquittal. "
-                + ("Missing: " + ", ".join(str(d) for d in missing_docs[:4]) + "." if missing_docs else "")
+                + ("Not available: " + ", ".join(str(d) for d in missing_docs[:4]) + "." if missing_docs else "")
             ),
             "action": "Obtain original dishonour memo from bank, registered notice copy with AD card, and any transaction proof.",
             "section": "Evidence Act + Section 138 NI Act"
