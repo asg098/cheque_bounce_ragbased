@@ -1,14 +1,4 @@
 #!/usr/bin/env python3
-"""
-JUDIQ AI - Section 138 Legal Analysis Engine
-Version: v10.0
-
-CRITICAL FIX: All "Missing Missing" patterns eliminated
-  - Changed all "Missing [item]" to "No [item] available — [context]"
-  - Removed dynamic "Missing " prefix concatenations at lines 8316, 8324
-  - Updated all output text to use proper phrasing throughout
-  - HTML sanitizeDOM() function enhanced for comprehensive cleanup
-"""
 import hashlib
 import json
 import logging
