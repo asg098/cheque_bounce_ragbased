@@ -1,14 +1,4 @@
 #!/usr/bin/env python3
-"""
-JUDIQ AI - Section 138 Legal Analysis Engine
-Version: v10.0
-
-CRITICAL FIX: All "Missing Missing" patterns eliminated
-  - Changed all "Missing [item]" to "No [item] available — [context]"
-  - Removed dynamic "Missing " prefix concatenations at lines 8316, 8324
-  - Updated all output text to use proper phrasing throughout
-  - HTML sanitizeDOM() function enhanced for comprehensive cleanup
-"""
 import hashlib
 import json
 import logging
@@ -125,6 +115,56 @@ def safe_get(data: Dict, *keys, default=None):
         else:
             return default
     return result if result is not None else default
+
+
+def sanitize_text(text: str) -> str:
+    """
+    Global text sanitizer to eliminate all 'Missing Missing' patterns and clean up text.
+    This is the FINAL fix to prevent any 'Missing' duplication from reaching the output.
+    """
+    if not text or not isinstance(text, str):
+        return text
+    
+    # AGGRESSIVE MULTI-PASS CLEANUP
+    max_iterations = 10
+    for _ in range(max_iterations):
+        prev = text
+        
+        # Remove all variations of "Missing Missing"
+        text = text.replace('Missing Missing Missing', '')
+        text = text.replace('Missing Missing', '')
+        text = text.replace('Missing - Missing', '')
+        text = text.replace('Missing  Missing', '')
+        text = text.replace('- Missing Missing', '')
+        text = text.replace('Missing -', '')
+        
+        # If no change, we're done
+        if text == prev:
+            break
+    
+    # Now remove any remaining single "Missing" and replace with proper phrasing
+    # But keep context-aware - don't blindly strip all "Missing"
+    text = text.replace('Missing written agreement', 'No written agreement available')
+    text = text.replace('Missing financial records', 'No financial records available')
+    text = text.replace('Missing rebuttal evidence', 'No rebuttal evidence provided')
+    text = text.replace('Missing postal receipt', 'No postal proof available')
+    text = text.replace('Missing proof of debt', 'No proof of debt available')
+    text = text.replace('Missing documentary', 'No documentary evidence')
+    text = text.replace('Missing legally enforceable', 'No legally enforceable debt proven')
+    
+    # Remove duplicate "Present Present"
+    text = text.replace('Present Present', 'Present')
+    text = text.replace('Present - Present', 'Present')
+    
+    # Clean up dashes and spaces
+    text = text.replace('- - ', ' ')
+    text = text.replace(' - - ', ' ')
+    text = text.strip(' -—').strip()
+    
+    # Clean up duplicate spaces
+    text = ' '.join(text.split())
+    
+    return text
 
 
 def format_timeline_transparency(timeline_data: Dict) -> Dict:
@@ -4305,7 +4345,7 @@ def analyze_presumption_rebuttal(case_data: Dict, ingredient_data: Dict, doc_dat
             presumption_analysis['burden_shift_timeline'].append({
                 'stage': 1,
                 'event': 'Cheque Execution To Be Proved',
-                'evidence': 'Original cheque not available - must prove by secondary evidence',
+                'evidence': 'Original cheque missing - must prove by secondary evidence',
                 'burden': 'On Complainant - PENDING'
             })
 
@@ -5598,7 +5638,7 @@ def analyze_defence_vulnerabilities(case_data: Dict, ingredient_analysis: Dict, 
         _add(
             'Technical / Procedural Defects',
             score8,
-            'Accused challenges procedural compliance: premature filing, limitation, documentary gaps.',
+            'Accused challenges procedural compliance: premature filing, limitation, missing documents.',
             [
                 'Point to premature filing dates in complaint itself',
                 'Challenge service of notice at correct address',
@@ -6204,7 +6244,7 @@ def calculate_overall_risk_score(
                 'defect': defect.get('defect', 'Fatal ingredient defect'),
                 'defect_type': defect_type,
                 'severity': 'FATAL',
-                'impact': 'Essential element not established'
+                'impact': 'Essential element missing'
             })
 
     risk_model['fatal_defects'] = all_fatal_defects
@@ -8168,7 +8208,7 @@ def analyze_director_role_liability(case_data: Dict) -> Dict:
     if not specific_averment_present:
         analysis['risk_assessment'] = {
             'risk_level': 'CRITICAL',
-            'issue': 'Specific averment not provided',
+            'issue': 'Specific averment missing',
             'consequence': 'Director liability cannot be established',
             'legal_basis': 'SMS Pharmaceuticals Ltd. v. Neeta Bhalla'
         }
@@ -8564,10 +8604,8 @@ def generate_executive_summary(
         s = _n(data.get('score') if isinstance(data, dict) else data)
         if s < 60:
             reason = (data.get('reason', '') or '') if isinstance(data, dict) else ''
-            # Clean up any "Missing" text in reason to prevent duplication
-            reason = reason.replace('Missing Missing', 'Missing').replace('Missing', '').strip()
-            # Remove leading/trailing dashes and whitespace
-            reason = reason.strip(' -—').strip()
+            # Apply global sanitizer to clean all Missing patterns
+            reason = sanitize_text(reason)
             weaknesses.append(
                 f"{cat}: {s}/100 — {reason or 'Insufficient — strengthen documentary evidence before filing'} ❌"
             )
@@ -9613,9 +9651,8 @@ def generate_clean_professional_report(analysis: Dict, case_data: Dict) -> Dict:
         s = _safe_score(data.get('score') if isinstance(data, dict) else data)
         if s < 60:
             reason = data.get('reason', '') if isinstance(data, dict) else ''
-            # Clean up any "Missing" text in reason to prevent duplication
-            reason = str(reason).replace('Missing Missing', 'Missing').replace('Missing', '').strip()
-            reason = reason.strip(' -—').strip()
+            # Apply global sanitizer to clean all Missing patterns
+            reason = sanitize_text(reason)
             weaknesses.append(f"{cat}: {s}/100 — {_safe(reason, 'Insufficient — strengthen documentary evidence before filing')}")
     if not case_data.get('written_agreement_exists'):
         weaknesses.append("No documentary proof of legally enforceable debt — accused can challenge the fundamental Section 138 ingredient")
@@ -9988,7 +10025,7 @@ def generate_clean_professional_report(analysis: Dict, case_data: Dict) -> Dict:
         if not case_data.get('ledger_available') and not case_data.get('written_agreement_exists'):
             weaknesses_list.append("absence of financial records")
         elif not case_data.get('ledger_available'):
-            weaknesses_list.append("incomplete transaction trail")
+            weaknesses_list.append("missing transaction trail")
         if not case_data.get('postal_proof_available'):
             weaknesses_list.append("unverified notice delivery")
             
@@ -16279,6 +16316,22 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         else:
             analysis_report['audit_trail']['database_saved'] = True
 
+        # CRITICAL: Apply global text sanitization to ALL strings in the entire analysis_report
+        # This is the FINAL defense against "Missing Missing" patterns reaching the frontend
+        def sanitize_nested_dict(obj):
+            """Recursively sanitize all strings in a nested data structure"""
+            if isinstance(obj, dict):
+                return {k: sanitize_nested_dict(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [sanitize_nested_dict(item) for item in obj]
+            elif isinstance(obj, str):
+                return sanitize_text(obj)
+            else:
+                return obj
+        
+        logger.info("🧹 Applying final text sanitization pass...")
+        analysis_report = sanitize_nested_dict(analysis_report)
+        logger.info("✅ Text sanitization complete")
 
         return analysis_report
 
