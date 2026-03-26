@@ -1,23 +1,4 @@
 #!/usr/bin/env python3
-"""
-JUDIQ AI - Legal Analysis Engine for Section 138 NI Act Cases
-Version: v10.0 (Enhanced Edition)
-
-This engine provides comprehensive legal analysis for cheque bounce cases under
-Section 138 of the Negotiable Instruments Act, 1881.
-
-Features:
-- Timeline compliance analysis (30-day notice, 15-day limitation)
-- Risk assessment with multi-dimensional scoring
-- Evidence strength evaluation
-- Settlement viability analysis
-- Presumption rebuttal analysis
-- Comprehensive report generation
-
-Author: JUDIQ AI Team
-License: Proprietary
-"""
-
 import hashlib
 import json
 import logging
@@ -25,88 +6,32 @@ import sqlite3
 import time
 import os
 import threading
-import traceback
 from datetime import datetime, timedelta, date
 from dateutil.relativedelta import relativedelta
 from typing import List, Dict, Optional, Tuple, Any
 from pathlib import Path
 from collections import defaultdict
 
-# Configure logging first
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('judiq.log'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
-
-# Optional dependencies with graceful fallbacks
 try:
     import pandas as pd
     PANDAS_AVAILABLE = True
-    logger.info("pandas loaded successfully")
 except ImportError:
     PANDAS_AVAILABLE = False
-    logger.warning("pandas not available - some features may be limited")
-
-try:
-    from flask import Flask, request, jsonify
-    from flask_cors import CORS
-    FLASK_AVAILABLE = True
-    logger.info("Flask loaded successfully")
-except ImportError:
-    FLASK_AVAILABLE = False
-    logger.warning("Flask not available - API server will not start")
-
-try:
-    import firebase_admin
-    from firebase_admin import credentials, firestore
-    FIREBASE_AVAILABLE = True
-    logger.info("Firebase SDK loaded successfully")
-except ImportError:
-    FIREBASE_AVAILABLE = False
-    logger.warning("Firebase not available - cloud features disabled")
 
 TORCH_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
+
 PHI2_AVAILABLE = False
 
-# Version constants
-ENGINE_VERSION = "v10.0-enhanced"
+
+ENGINE_VERSION = "v10.0"
 SCORING_MODEL_VERSION = "5.0"
 TIMELINE_MATH_VERSION = "CALENDAR_MONTHS"
 
-logger.info(f"JUDIQ AI Engine {ENGINE_VERSION} initialized")
-
 
 def indian_number_format(amount: float) -> str:
-    """
-    Format number in Indian numbering style: 5,00,000 instead of 500,000.
-    
-    Args:
-        amount: The number to format (int or float)
-        
-    Returns:
-        Formatted string in Indian numbering system with proper comma placement
-        
-    Examples:
-        >>> indian_number_format(500000)
-        '5,00,000'
-        >>> indian_number_format(1234567.50)
-        '12,34,567.50'
-    """
-    if not isinstance(amount, (int, float)):
-        try:
-            amount = float(amount)
-        except (ValueError, TypeError):
-            return str(amount)
-    
-    # Handle negative numbers
-    is_negative = amount < 0
-    amount = abs(amount)
-    
+    """Format number in Indian style: 5,00,000 instead of 500,000."""
     s = str(int(amount))
     if len(s) <= 3:
         result = s
@@ -119,51 +44,19 @@ def indian_number_format(amount: float) -> str:
         if s:
             result = s + ',' + result
 
-    # Add decimal part if present
     paise = round((amount % 1) * 100)
     if paise:
-        result = f"{result}.{paise:02d}"
-    
-    return f"-{result}" if is_negative else result
+        return f"{result}.{paise:02d}"
+    return result
 
 
 def add_calendar_months(start_date, months: int):
-    """
-    Add calendar months to a date (not 30-day approximations).
-    
-    This function uses proper calendar month arithmetic, which is critical for
-    legal timeline calculations under Section 138 NI Act.
-    
-    Args:
-        start_date: Starting date (datetime.date, datetime.datetime, or 'YYYY-MM-DD' string)
-        months: Number of months to add (can be negative)
-        
-    Returns:
-        datetime.date object with months added
-        
-    Raises:
-        ValueError: If date format is invalid
-        
-    Examples:
-        >>> add_calendar_months('2024-01-31', 1)
-        datetime.date(2024, 2, 29)  # Properly handles month-end dates
-    """
+
     if isinstance(start_date, str):
         try:
             start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
-        except (ValueError, TypeError) as e:
-            raise ValueError(f"Invalid date '{start_date}' — expected YYYY-MM-DD format") from e
-    elif isinstance(start_date, datetime):
-        start_date = start_date.date()
-    elif not isinstance(start_date, date):
-        raise ValueError(f"Invalid date type: {type(start_date)}")
-    
-    if not isinstance(months, int):
-        try:
-            months = int(months)
-        except (ValueError, TypeError) as e:
-            raise ValueError(f"Months must be an integer, got: {months}") from e
-    
+        except (ValueError, TypeError):
+            raise ValueError(f"Invalid date '{start_date}' — expected YYYY-MM-DD")
     return start_date + relativedelta(months=months)
 
 
