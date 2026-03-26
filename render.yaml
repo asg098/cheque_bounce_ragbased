@@ -16,20 +16,7 @@ services:
         value: 1DfejIbgRXco3Tpp_aTBfarIm7h3t32EVykJGkEFdee4
 
       - key: GDRIVE_API_KEY
-        value: ""   # optional — leave empty if not using
-
-      # ── Firebase Auth (Project: idcourt-cb58f) ────────────────────────────
-      #
-      # HOW TO GET YOUR SERVICE ACCOUNT KEY (one-time setup):
-      #   1. Go to https://console.firebase.google.com
-      #   2. Select project  →  idcourt-cb58f
-      #   3. Project Settings  →  Service Accounts tab
-      #   4. Click "Generate new private key"  →  download the JSON file
-      #   5. Open the JSON file, copy ALL of its content (the entire JSON)
-      #   6. In Render Dashboard  →  Environment  →  add a SECRET env var:
-      #        Key:   FIREBASE_SERVICE_ACCOUNT_JSON
-      #        Value: <paste the entire JSON string here>
-      #
+        value: ""   
       - key: FIREBASE_SERVICE_ACCOUNT_JSON
         value: ""   # ← REQUIRED: paste full service-account JSON string here
 
