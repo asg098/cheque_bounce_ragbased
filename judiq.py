@@ -9383,28 +9383,31 @@ def generate_filing_readiness_checklist(
 
 
 def _safe(value, default="DATA NOT AVAILABLE", fmt=None):
-    """Return value safely, replacing None/empty/broken with default. Optionally format numbers."""
+    """Return value safely, replacing None/empty/broken with default. Optionally format numbers. Cleans all text."""
     if value is None or value == "" or value == {} or value == []:
         return default
-    if isinstance(value, str) and value.strip() in ('??', '?', 'undefined', 'null', 'None', 'nan'):
-        return default
-    if isinstance(value, str) and '\ufffd' in value:
-        value = value.replace('\ufffd', '')
-        if not value.strip():
+    if isinstance(value, str):
+        # CRITICAL: Clean through sanitize_text to remove "Missing Missing" patterns
+        value = sanitize_text(value)
+        if value.strip() in ('??', '?', 'undefined', 'null', 'None', 'nan', ''):
             return default
+        if '\ufffd' in value:
+            value = value.replace('\ufffd', '')
+            if not value.strip():
+                return default
     if fmt == "inr" and isinstance(value, (int, float)):
         return f"₹{indian_number_format(value)}"
     if fmt == "score" and isinstance(value, (int, float)):
         return f"{value:.1f}/100"
     if fmt == "pct" and isinstance(value, (int, float)):
         return f"{value:.1f}%"
-    return str(value)
+    return str(value) if not isinstance(value, str) else value
 
 
 def sanitize_module_output(data, _depth=0):
     """
     Recursively replace None / empty values with meaningful fallbacks
-    so the PDF renderer never receives null and shows broken characters.
+    and clean all text through sanitize_text() to remove "Missing Missing" patterns.
     """
     if _depth > 10:
         return data
@@ -9415,7 +9418,9 @@ def sanitize_module_output(data, _depth=0):
     if isinstance(data, list):
         return [sanitize_module_output(i, _depth+1) for i in data]
     if isinstance(data, str):
-        cleaned = data.replace('\ufffd', '').replace('\u0000', '')
+        # CRITICAL: Apply sanitize_text to clean "Missing Missing" patterns
+        cleaned = sanitize_text(data)
+        cleaned = cleaned.replace('\ufffd', '').replace('\u0000', '')
         if cleaned.strip() in ('', '??', '?', 'undefined', 'null', 'None', 'nan'):
             return "DATA NOT AVAILABLE"
         return cleaned
@@ -9425,15 +9430,18 @@ def sanitize_module_output(data, _depth=0):
 
 
 def _safe_simple(val, fallback="DATA NOT AVAILABLE"):
-    """Return val if truthy and not None/broken, else fallback. Simple version without fmt."""
+    """Return val if truthy and not None/broken, else fallback. Cleans all text."""
     if val is None or val == "" or val == [] or val == {}:
         return fallback
-    if isinstance(val, str) and val.strip() in ('??', '?', 'undefined', 'null', 'None', 'nan'):
-        return fallback
-    if isinstance(val, str) and '\ufffd' in val:
-        val = val.replace('\ufffd', '')
-        if not val.strip():
+    if isinstance(val, str):
+        # CRITICAL: Clean through sanitize_text first
+        val = sanitize_text(val)
+        if val.strip() in ('??', '?', 'undefined', 'null', 'None', 'nan', ''):
             return fallback
+        if '\ufffd' in val:
+            val = val.replace('\ufffd', '')
+            if not val.strip():
+                return fallback
     return val
 
 
