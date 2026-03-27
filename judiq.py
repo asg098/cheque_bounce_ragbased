@@ -25,9 +25,24 @@ logger = logging.getLogger(__name__)
 PHI2_AVAILABLE = False
 
 
-ENGINE_VERSION = "v10.0"
-SCORING_MODEL_VERSION = "5.0"
+ENGINE_VERSION = "v11.0-ENHANCED"
+SCORING_MODEL_VERSION = "6.0"
 TIMELINE_MATH_VERSION = "CALENDAR_MONTHS"
+
+# Enhanced Feature Flags
+ENHANCED_FEATURES_ENABLED = True
+CASE_STRENGTH_SCORING = True
+DOCUMENT_INTELLIGENCE = True
+DIRECTOR_LIABILITY_ANALYSIS = True
+PAYMENT_DISPUTE_SYSTEM = True
+DEFENCE_GENERATOR = True
+STRATEGY_ENGINE = True
+OUTCOME_PREDICTION = True
+TIME_COST_ANALYSIS = True
+RECOVERY_INTELLIGENCE = True
+MULTI_CASE_COMPARISON = True
+PDF_REPORT_GENERATION = True
+FEEDBACK_LEARNING_SYSTEM = True
 
 
 def indian_number_format(amount: float) -> str:
@@ -125,57 +140,61 @@ def sanitize_text(text: str) -> str:
     if not text or not isinstance(text, str):
         return text
     
-    # CRITICAL DEBUG: Log if we find "Missing Missing" BEFORE cleanup
-    if 'missing missing' in text.lower():
-        import traceback
-        logger.error(f"⚠️⚠️⚠️ FOUND 'Missing Missing' IN INPUT: '{text}'")
-        logger.error("Call stack:")
-        for line in traceback.format_stack()[:-1]:
-            if 'judiq' in line:
-                logger.error(line.strip())
-    
     # AGGRESSIVE MULTI-PASS CLEANUP
-    max_iterations = 10
+    max_iterations = 15
     for _ in range(max_iterations):
         prev = text
         
-        # Remove all variations of "Missing Missing"
+        # Remove all variations of "Missing Missing" and similar patterns
+        text = text.replace('Missing Missing Missing Missing', '')
         text = text.replace('Missing Missing Missing', '')
         text = text.replace('Missing Missing', '')
         text = text.replace('Missing - Missing', '')
         text = text.replace('Missing  Missing', '')
         text = text.replace('- Missing Missing', '')
+        text = text.replace('Missing Missing -', '')
         text = text.replace('Missing -', '')
+        text = text.replace('- Missing', '')
+        
+        # Remove patterns like "- - Missing"
+        text = text.replace('- - Missing', '')
+        text = text.replace('- Missing - -', '')
         
         # If no change, we're done
         if text == prev:
             break
     
-    # Now remove any remaining single "Missing" and replace with proper phrasing
-    # But keep context-aware - don't blindly strip all "Missing"
-    text = text.replace('Missing written agreement', 'No written agreement available')
-    text = text.replace('Missing financial records', 'No financial records available')
-    text = text.replace('Missing rebuttal evidence', 'No rebuttal evidence provided')
-    text = text.replace('Missing postal receipt', 'No postal proof available')
-    text = text.replace('Missing proof of debt', 'No proof of debt available')
+    # Context-aware replacements for standalone "Missing"
+    text = text.replace('Missing written agreement', 'No written agreement')
+    text = text.replace('Missing financial records', 'No financial records')
+    text = text.replace('Missing rebuttal evidence', 'No rebuttal evidence')
+    text = text.replace('Missing postal receipt', 'No postal proof')
+    text = text.replace('Missing proof of debt', 'No proof of debt')
     text = text.replace('Missing documentary', 'No documentary evidence')
     text = text.replace('Missing legally enforceable', 'No legally enforceable debt proven')
     
     # Remove duplicate "Present Present"
+    text = text.replace('Present Present Present', 'Present')
     text = text.replace('Present Present', 'Present')
     text = text.replace('Present - Present', 'Present')
     
-    # Clean up dashes and spaces
+    # Clean up multiple dashes and spaces
+    text = text.replace('- - - ', ' ')
     text = text.replace('- - ', ' ')
     text = text.replace(' - - ', ' ')
+    text = text.replace('— — ', '— ')
     text = text.strip(' -—').strip()
     
     # Clean up duplicate spaces
     text = ' '.join(text.split())
     
-    # FINAL CHECK: If "Missing Missing" still present after cleanup, log it
-    if 'missing missing' in text.lower():
-        logger.error(f"❌ SANITIZE FAILED: Still contains 'Missing Missing': '{text}'")
+    # Final pass - if text ends with just "Missing", replace it
+    if text.endswith(' Missing'):
+        text = text[:-8].strip()
+    
+    # If text is just "Missing", return empty or appropriate default
+    if text.strip() in ['Missing', 'Missing Missing', '- Missing', 'Missing -']:
+        text = ''
     
     return text
 
@@ -4595,7 +4614,7 @@ def analyze_security_cheque_probability(case_data: Dict) -> Dict:
     elif probability_score >= 50:
         probability = 'HIGH'
         defence_strength = 'STRONG'
-        recommendation = 'Security cheque defence probable — strengthen documentary evidence before filing'
+        recommendation = 'Security cheque defence probable — strengthen evidence base before filing'
     elif probability_score >= 30:
         probability = 'MEDIUM'
         defence_strength = 'MODERATE'
@@ -8412,10 +8431,10 @@ def analyze_document_compliance(case_data: Dict) -> Dict:
     compliance['fatal_documents_missing'] = fatal_missing
 
     compliance['evidence_classification'] = {
-        'original_cheque': 'Original' if case_data.get('original_cheque_available') else 'Copy only - original not available',
+        'original_cheque': 'Original' if case_data.get('original_cheque_available') else 'MISSING/COPY',
 
-        'dishonour_memo': 'Original with seal' if (case_data.get('return_memo_available') and case_data.get('dishonour_memo_seal')) else ('Original' if case_data.get('return_memo_available') else 'Not available'),
-        'notice': 'Original' if (case_data.get('notice_copy_available') or case_data.get('legal_notice_available') or case_data.get('notice_date')) else 'Not available',
+        'dishonour_memo': 'Original with seal' if (case_data.get('return_memo_available') and case_data.get('dishonour_memo_seal')) else ('Original' if case_data.get('return_memo_available') else 'DEFECTIVE'),
+        'notice': 'Original' if (case_data.get('notice_copy_available') or case_data.get('legal_notice_available') or case_data.get('notice_date')) else 'MISSING',
         'classification_status': 'Strong' if (case_data.get('original_cheque_available') and case_data.get('return_memo_available')) else 'FATAL'
     }
 
@@ -8620,7 +8639,7 @@ def generate_executive_summary(
             # Apply global sanitizer to clean all Missing patterns
             reason = sanitize_text(reason)
             weaknesses.append(
-                f"{cat}: {s}/100 — {reason or 'Insufficient — strengthen documentary evidence before filing'} ❌"
+                f"{cat}: {s}/100 — {reason or 'Insufficient evidence'} ❌"
             )
     if not case_data.get('written_agreement_exists'):
         weaknesses.append("No written agreement available — enforceability risk ❌")
@@ -9364,28 +9383,31 @@ def generate_filing_readiness_checklist(
 
 
 def _safe(value, default="DATA NOT AVAILABLE", fmt=None):
-    """Return value safely, replacing None/empty/broken with default. Optionally format numbers."""
+    """Return value safely, replacing None/empty/broken with default. Optionally format numbers. Cleans all text."""
     if value is None or value == "" or value == {} or value == []:
         return default
-    if isinstance(value, str) and value.strip() in ('??', '?', 'undefined', 'null', 'None', 'nan'):
-        return default
-    if isinstance(value, str) and '\ufffd' in value:
-        value = value.replace('\ufffd', '')
-        if not value.strip():
+    if isinstance(value, str):
+        # CRITICAL: Clean through sanitize_text to remove "Missing Missing" patterns
+        value = sanitize_text(value)
+        if value.strip() in ('??', '?', 'undefined', 'null', 'None', 'nan', ''):
             return default
+        if '\ufffd' in value:
+            value = value.replace('\ufffd', '')
+            if not value.strip():
+                return default
     if fmt == "inr" and isinstance(value, (int, float)):
         return f"₹{indian_number_format(value)}"
     if fmt == "score" and isinstance(value, (int, float)):
         return f"{value:.1f}/100"
     if fmt == "pct" and isinstance(value, (int, float)):
         return f"{value:.1f}%"
-    return str(value)
+    return str(value) if not isinstance(value, str) else value
 
 
 def sanitize_module_output(data, _depth=0):
     """
     Recursively replace None / empty values with meaningful fallbacks
-    so the PDF renderer never receives null and shows broken characters.
+    and clean all text through sanitize_text() to remove "Missing Missing" patterns.
     """
     if _depth > 10:
         return data
@@ -9396,7 +9418,9 @@ def sanitize_module_output(data, _depth=0):
     if isinstance(data, list):
         return [sanitize_module_output(i, _depth+1) for i in data]
     if isinstance(data, str):
-        cleaned = data.replace('\ufffd', '').replace('\u0000', '')
+        # CRITICAL: Apply sanitize_text to clean "Missing Missing" patterns
+        cleaned = sanitize_text(data)
+        cleaned = cleaned.replace('\ufffd', '').replace('\u0000', '')
         if cleaned.strip() in ('', '??', '?', 'undefined', 'null', 'None', 'nan'):
             return "DATA NOT AVAILABLE"
         return cleaned
@@ -9406,15 +9430,18 @@ def sanitize_module_output(data, _depth=0):
 
 
 def _safe_simple(val, fallback="DATA NOT AVAILABLE"):
-    """Return val if truthy and not None/broken, else fallback. Simple version without fmt."""
+    """Return val if truthy and not None/broken, else fallback. Cleans all text."""
     if val is None or val == "" or val == [] or val == {}:
         return fallback
-    if isinstance(val, str) and val.strip() in ('??', '?', 'undefined', 'null', 'None', 'nan'):
-        return fallback
-    if isinstance(val, str) and '\ufffd' in val:
-        val = val.replace('\ufffd', '')
-        if not val.strip():
+    if isinstance(val, str):
+        # CRITICAL: Clean through sanitize_text first
+        val = sanitize_text(val)
+        if val.strip() in ('??', '?', 'undefined', 'null', 'None', 'nan', ''):
             return fallback
+        if '\ufffd' in val:
+            val = val.replace('\ufffd', '')
+            if not val.strip():
+                return fallback
     return val
 
 
@@ -9666,7 +9693,7 @@ def generate_clean_professional_report(analysis: Dict, case_data: Dict) -> Dict:
             reason = data.get('reason', '') if isinstance(data, dict) else ''
             # Apply global sanitizer to clean all Missing patterns
             reason = sanitize_text(reason)
-            weaknesses.append(f"{cat}: {s}/100 — {_safe(reason, 'Insufficient — strengthen documentary evidence before filing')}")
+            weaknesses.append(f"{cat}: {s}/100 — {_safe(reason, 'Insufficient evidence')}")
     if not case_data.get('written_agreement_exists'):
         weaknesses.append("No documentary proof of legally enforceable debt — accused can challenge the fundamental Section 138 ingredient")
     if not case_data.get('ledger_available'):
@@ -15457,7 +15484,7 @@ def perform_comprehensive_analysis(case_data: Dict) -> Dict:
         _tl_score_narrative  = float((analysis_report.get('modules', {}).get('risk_assessment', {}).get('category_scores') or {}).get('Timeline Compliance', {}).get('score', 0) if isinstance((analysis_report.get('modules', {}).get('risk_assessment', {}).get('category_scores') or {}).get('Timeline Compliance'), dict) else 0)
         analysis_report['decision_narrative'] = [
             f"Timeline compliance: {_tl_score_narrative:.0f}/100 — {'Strong ✅' if _tl_score_narrative >= 75 else 'Weak ❌'}",
-            f"Documentary strength: {_doc_score_narrative:.0f}/100 — {'Adequate ✅' if _doc_score_narrative >= 60 else 'Insufficient — strengthen documentary evidence before filing ❌'}",
+            f"Documentary strength: {_doc_score_narrative:.0f}/100 — {'Adequate ✅' if _doc_score_narrative >= 60 else 'Insufficient documentary evidence ❌'}",
             f"Fatal defects: {'Yes — filing blocked' if _fatal_for_narrative else 'None detected ✅'}",
             f"Overall score: {_score_for_narrative:.1f}/100",
             f"Decision basis: {'Fatal defect present — do not file' if _fatal_for_narrative else 'FILE WITH CAUTION — documentary weakness is primary gap' if _score_for_narrative < 70 else 'Case is strong — proceed to file'}",
@@ -16961,7 +16988,56 @@ def _build_flat_report(a: dict) -> dict:
         'platform_email':         'hello@judiq.ai',
         'platform_website':       'www.judiq.ai',
         'platform_address':       'JUDIQ AI — Section 138 Intelligence Platform',
+        
+        # ============================================================================
+        # ENHANCED FEATURES - Integrated seamlessly with existing analysis
+        # ============================================================================
+        'case_strength_score': calculate_case_strength_score(case_data, mods) if CASE_STRENGTH_SCORING else None,
+        'document_intelligence': analyze_document_intelligence(case_data) if DOCUMENT_INTELLIGENCE else None,
+        'director_liability': analyze_director_liability(case_data) if DIRECTOR_LIABILITY_ANALYSIS else None,
+        'payment_dispute': analyze_payment_dispute(case_data) if PAYMENT_DISPUTE_SYSTEM else None,
+        'defence_analysis': generate_defence_analysis(case_data, analyze_document_intelligence(case_data) if DOCUMENT_INTELLIGENCE else {}) if DEFENCE_GENERATOR else None,
+        'outcome_prediction': None,  # Will be calculated after other features
+        'time_cost_analysis': None,  # Will be calculated after strength score
+        'recovery_intelligence': None,  # Will be calculated after outcome prediction
+        'executive_summary_enhanced': None,  # Will be generated at the end
     })
+    
+    # Post-process enhanced features that depend on previous calculations
+    result_with_enhanced = analysis_report
+    
+    if STRATEGY_ENGINE and result_with_enhanced.get('case_strength_score'):
+        result_with_enhanced['filing_strategy'] = generate_filing_strategy(
+            result_with_enhanced.get('case_strength_score', {}),
+            result_with_enhanced.get('defence_analysis', {}),
+            result_with_enhanced.get('recovery_intelligence', {})
+        )
+    
+    if OUTCOME_PREDICTION and result_with_enhanced.get('case_strength_score'):
+        result_with_enhanced['outcome_prediction'] = predict_case_outcome(
+            result_with_enhanced.get('case_strength_score', {}),
+            result_with_enhanced.get('defence_analysis', {}),
+            case_data
+        )
+    
+    if TIME_COST_ANALYSIS and result_with_enhanced.get('case_strength_score'):
+        result_with_enhanced['time_cost_analysis'] = analyze_time_and_cost(
+            case_data,
+            result_with_enhanced.get('case_strength_score', {})
+        )
+    
+    if RECOVERY_INTELLIGENCE and result_with_enhanced.get('case_strength_score') and result_with_enhanced.get('outcome_prediction'):
+        result_with_enhanced['recovery_intelligence'] = analyze_recovery_intelligence(
+            case_data,
+            result_with_enhanced.get('case_strength_score', {}),
+            result_with_enhanced.get('outcome_prediction', {})
+        )
+    
+    # Generate executive summary if enabled
+    if result_with_enhanced.get('case_strength_score'):
+        result_with_enhanced['executive_summary_enhanced'] = generate_executive_summary(result_with_enhanced)
+    
+    return result_with_enhanced
 
 @app.post("/generate-cross-examination")
 async def generate_cross_examination(request: CrossExaminationRequest):
@@ -19831,6 +19907,1587 @@ def apply_severity_tier_escalation(issues: Dict) -> Dict:
         }
 
 
+# ============================================================================
+# ENHANCED FEATURES - CASE STRENGTH SCORING (0-100)
+# ============================================================================
+
+def calculate_case_strength_score(case_data: Dict, analysis_modules: Dict) -> Dict:
+    """
+    Calculate comprehensive case strength score (0-100) with detailed breakdown
+    """
+    scores = {
+        'legal_validity': 0,
+        'timeline_compliance': 0,
+        'documentary_evidence': 0,
+        'notice_compliance': 0,
+        'defendant_profile': 0,
+        'recovery_prospects': 0
+    }
+    
+    weights = {
+        'legal_validity': 0.25,
+        'timeline_compliance': 0.20,
+        'documentary_evidence': 0.20,
+        'notice_compliance': 0.15,
+        'defendant_profile': 0.10,
+        'recovery_prospects': 0.10
+    }
+    
+    # 1. Legal Validity Check
+    legal_score = 100
+    if not case_data.get('cheque_amount') or case_data.get('cheque_amount', 0) <= 0:
+        legal_score -= 30
+    if not case_data.get('cheque_date'):
+        legal_score -= 25
+    if not case_data.get('dishonour_date'):
+        legal_score -= 25
+    if not case_data.get('dishonour_reason'):
+        legal_score -= 10
+    elif case_data.get('dishonour_reason') == 'Stop Payment':
+        legal_score -= 5  # Minor risk
+    
+    scores['legal_validity'] = max(0, legal_score)
+    
+    # 2. Timeline Compliance
+    timeline_score = 100
+    timeline_data = analysis_modules.get('timeline_analysis', {})
+    
+    if timeline_data.get('limitation_status') == 'TIME-BARRED':
+        timeline_score = 0
+    elif timeline_data.get('limitation_status') == 'NEAR EXPIRY':
+        timeline_score = 40
+    else:
+        compliance = timeline_data.get('compliance', {})
+        if not compliance.get('notice_within_30_days', True):
+            timeline_score -= 40
+        if not compliance.get('complaint_within_limitation', True):
+            timeline_score -= 60
+    
+    scores['timeline_compliance'] = max(0, timeline_score)
+    
+    # 3. Documentary Evidence
+    doc_score = 100
+    doc_data = analysis_modules.get('document_intelligence', {})
+    
+    doc_presence = doc_data.get('document_presence', {})
+    if not doc_presence.get('cheque', {}).get('present'):
+        doc_score -= 50
+    if not doc_presence.get('notice', {}).get('present'):
+        doc_score -= 20
+    if not doc_presence.get('proof_of_debt', {}).get('present'):
+        doc_score -= 15
+    if not doc_presence.get('bank_proof', {}).get('present'):
+        doc_score -= 15
+    
+    scores['documentary_evidence'] = max(0, doc_score)
+    
+    # 4. Notice Compliance
+    notice_score = 100
+    if not case_data.get('notice_date'):
+        notice_score -= 50
+    if not case_data.get('notice_service_date'):
+        notice_score -= 30
+    if case_data.get('notice_service_method') == 'Not Served':
+        notice_score -= 20
+    
+    scores['notice_compliance'] = max(0, notice_score)
+    
+    # 5. Defendant Profile (affects recovery)
+    defendant_score = 50  # Neutral default
+    defendant_type = case_data.get('defendant_type', 'individual')
+    
+    if defendant_type == 'company':
+        # Check if company is operational
+        if case_data.get('company_status') == 'active':
+            defendant_score = 70
+        elif case_data.get('company_status') == 'dormant':
+            defendant_score = 40
+        else:
+            defendant_score = 20
+    elif defendant_type == 'individual':
+        defendant_score = 60
+    
+    scores['defendant_profile'] = defendant_score
+    
+    # 6. Recovery Prospects
+    recovery_score = 60  # Default moderate
+    amount = case_data.get('cheque_amount', 0)
+    
+    if amount > 10000000:  # > 1 Crore
+        recovery_score = 80  # High value = serious case
+    elif amount > 1000000:  # > 10 Lakhs
+        recovery_score = 70
+    elif amount > 100000:  # > 1 Lakh
+        recovery_score = 60
+    else:
+        recovery_score = 40  # Small claims harder to justify costs
+    
+    scores['recovery_prospects'] = recovery_score
+    
+    # Calculate weighted total
+    total_score = sum(scores[k] * weights[k] for k in scores.keys())
+    
+    # Risk categories
+    if total_score >= 80:
+        risk_level = "EXCELLENT"
+        recommendation = "FILE IMMEDIATELY"
+        confidence = "Very High"
+    elif total_score >= 60:
+        risk_level = "GOOD"
+        recommendation = "READY TO FILE"
+        confidence = "High"
+    elif total_score >= 40:
+        risk_level = "MODERATE"
+        recommendation = "ADDRESS GAPS FIRST"
+        confidence = "Medium"
+    elif total_score >= 20:
+        risk_level = "WEAK"
+        recommendation = "HIGH RISK - CAUTION"
+        confidence = "Low"
+    else:
+        risk_level = "VERY WEAK"
+        recommendation = "AVOID FILING"
+        confidence = "Very Low"
+    
+    return {
+        'overall_score': round(total_score, 1),
+        'component_scores': scores,
+        'weights': weights,
+        'risk_level': risk_level,
+        'filing_recommendation': recommendation,
+        'confidence_level': confidence,
+        'interpretation': f"Case strength: {risk_level} ({round(total_score)}%)"
+    }
+
+
+# ============================================================================
+# DOCUMENT INTELLIGENCE SYSTEM
+# ============================================================================
+
+def analyze_document_intelligence(case_data: Dict) -> Dict:
+    """
+    Advanced document presence detection, strength grading, and contradiction detection
+    """
+    
+    documents = {
+        'cheque': {
+            'present': bool(case_data.get('cheque_number')),
+            'strength': 'Missing',
+            'issues': []
+        },
+        'agreement': {
+            'present': case_data.get('has_written_agreement', False),
+            'strength': 'Missing',
+            'issues': []
+        },
+        'notice': {
+            'present': bool(case_data.get('notice_date')),
+            'strength': 'Missing',
+            'issues': []
+        },
+        'bank_proof': {
+            'present': case_data.get('has_bank_statement', False),
+            'strength': 'Missing',
+            'issues': []
+        },
+        'proof_of_debt': {
+            'present': False,
+            'strength': 'Missing',
+            'issues': []
+        }
+    }
+    
+    # Cheque Analysis
+    if documents['cheque']['present']:
+        cheque_issues = []
+        if not case_data.get('cheque_date'):
+            cheque_issues.append("Missing cheque date")
+        if not case_data.get('cheque_amount') or case_data.get('cheque_amount', 0) <= 0:
+            cheque_issues.append("Invalid amount")
+        if not case_data.get('bank_name'):
+            cheque_issues.append("Bank details missing")
+        
+        if len(cheque_issues) == 0:
+            documents['cheque']['strength'] = 'Strong'
+        elif len(cheque_issues) <= 1:
+            documents['cheque']['strength'] = 'Moderate'
+        else:
+            documents['cheque']['strength'] = 'Weak'
+        
+        documents['cheque']['issues'] = cheque_issues
+    
+    # Agreement Analysis
+    if documents['agreement']['present']:
+        agr_issues = []
+        if not case_data.get('agreement_date'):
+            agr_issues.append("Agreement date missing")
+        if not case_data.get('agreement_terms'):
+            agr_issues.append("Terms not specified")
+        
+        documents['agreement']['strength'] = 'Strong' if len(agr_issues) == 0 else 'Moderate'
+        documents['agreement']['issues'] = agr_issues
+    
+    # Notice Analysis
+    if documents['notice']['present']:
+        notice_issues = []
+        if not case_data.get('notice_service_date'):
+            notice_issues.append("Service date missing")
+        if case_data.get('notice_service_method') == 'Not Served':
+            notice_issues.append("Notice not properly served")
+        if not case_data.get('notice_reply_received'):
+            notice_issues.append("No reply tracking")
+        
+        documents['notice']['strength'] = 'Strong' if len(notice_issues) == 0 else 'Moderate'
+        documents['notice']['issues'] = notice_issues
+    
+    # Proof of Debt Analysis
+    has_agreement = case_data.get('has_written_agreement', False)
+    has_invoice = case_data.get('has_invoice', False)
+    has_ledger = case_data.get('has_ledger', False)
+    
+    if has_agreement or has_invoice or has_ledger:
+        documents['proof_of_debt']['present'] = True
+        if has_agreement and has_invoice:
+            documents['proof_of_debt']['strength'] = 'Strong'
+        elif has_agreement or has_invoice:
+            documents['proof_of_debt']['strength'] = 'Moderate'
+        else:
+            documents['proof_of_debt']['strength'] = 'Weak'
+    
+    # Contradiction Detection
+    contradictions = []
+    
+    # Check date contradictions
+    if case_data.get('cheque_date') and case_data.get('dishonour_date'):
+        try:
+            cheque_dt = datetime.strptime(case_data['cheque_date'], '%Y-%m-%d')
+            dishonour_dt = datetime.strptime(case_data['dishonour_date'], '%Y-%m-%d')
+            if dishonour_dt < cheque_dt:
+                contradictions.append({
+                    'type': 'Date Mismatch',
+                    'severity': 'CRITICAL',
+                    'description': 'Dishonour date is before cheque date',
+                    'impact': 'Fatal defect - case will fail'
+                })
+        except:
+            pass
+    
+    # Check amount contradictions
+    if case_data.get('cheque_amount') and case_data.get('claimed_amount'):
+        if case_data['cheque_amount'] != case_data['claimed_amount']:
+            contradictions.append({
+                'type': 'Amount Mismatch',
+                'severity': 'HIGH',
+                'description': f"Cheque amount ({case_data['cheque_amount']}) != Claimed amount ({case_data['claimed_amount']})",
+                'impact': 'Requires explanation'
+            })
+    
+    # Overall document strength
+    doc_scores = []
+    for doc_type, doc_info in documents.items():
+        if doc_info['present']:
+            if doc_info['strength'] == 'Strong':
+                doc_scores.append(100)
+            elif doc_info['strength'] == 'Moderate':
+                doc_scores.append(60)
+            else:
+                doc_scores.append(30)
+        else:
+            doc_scores.append(0)
+    
+    overall_doc_strength = sum(doc_scores) / len(doc_scores) if doc_scores else 0
+    
+    return {
+        'document_presence': documents,
+        'contradictions': contradictions,
+        'overall_strength': overall_doc_strength,
+        'strength_grade': 'Strong' if overall_doc_strength >= 70 else 'Moderate' if overall_doc_strength >= 40 else 'Weak',
+        'critical_gaps': [k for k, v in documents.items() if not v['present'] and k in ['cheque', 'notice']]
+    }
+
+
+# ============================================================================
+# DIRECTOR & COMPANY LIABILITY ANALYSIS
+# ============================================================================
+
+def analyze_director_liability(case_data: Dict) -> Dict:
+    """
+    Comprehensive director and company liability analysis
+    """
+    
+    defendant_type = case_data.get('defendant_type', 'individual')
+    
+    if defendant_type not in ['company', 'firm']:
+        return {
+            'applicable': False,
+            'message': 'Director liability analysis not applicable for individual defendants'
+        }
+    
+    analysis = {
+        'applicable': True,
+        'company_details': {
+            'name': case_data.get('company_name', 'Not specified'),
+            'type': case_data.get('company_type', 'Private Limited'),
+            'status': case_data.get('company_status', 'Unknown')
+        },
+        'signatories': [],
+        'director_liability': {},
+        'recommendations': []
+    }
+    
+    # Signatory Analysis
+    signatory_name = case_data.get('signatory_name', '')
+    signatory_role = case_data.get('signatory_role', 'Unknown')
+    
+    if signatory_name:
+        signatory = {
+            'name': signatory_name,
+            'role': signatory_role,
+            'responsibility_level': 'Unknown',
+            'liability_exposure': 'Unknown'
+        }
+        
+        # Determine liability based on role
+        if signatory_role in ['Director', 'Managing Director', 'Whole-time Director']:
+            signatory['responsibility_level'] = 'HIGH'
+            signatory['liability_exposure'] = 'DIRECT - Can be prosecuted under Section 141 NI Act'
+            analysis['recommendations'].append(f"Implead {signatory_name} as accused under Section 141 NI Act")
+        elif signatory_role in ['Company Secretary', 'CFO']:
+            signatory['responsibility_level'] = 'MEDIUM'
+            signatory['liability_exposure'] = 'POTENTIAL - If in charge of business operations'
+            analysis['recommendations'].append(f"Verify if {signatory_name} was in charge at the time")
+        else:
+            signatory['responsibility_level'] = 'LOW'
+            signatory['liability_exposure'] = 'LIMITED - May not be personally liable'
+        
+        analysis['signatories'].append(signatory)
+    
+    # Director Liability Assessment
+    directors = case_data.get('directors', [])
+    if not directors and signatory_name:
+        directors = [{'name': signatory_name, 'role': signatory_role, 'status': 'active'}]
+    
+    for director in directors:
+        name = director.get('name', 'Unknown')
+        role = director.get('role', 'Director')
+        status = director.get('status', 'active')
+        
+        liability_assessment = {
+            'name': name,
+            'designation': role,
+            'status': status,
+            'personal_liability': 'Unknown',
+            'risk_level': 'Unknown',
+            'action_required': ''
+        }
+        
+        # Active directors in charge
+        if status == 'active' and role in ['Director', 'Managing Director', 'Whole-time Director']:
+            liability_assessment['personal_liability'] = 'HIGH - Directly liable under S.141'
+            liability_assessment['risk_level'] = 'CRITICAL'
+            liability_assessment['action_required'] = 'Must be made accused in complaint'
+        
+        # Sleeping/Nominee directors
+        elif status == 'active' and 'Nominee' in role:
+            liability_assessment['personal_liability'] = 'MEDIUM - May escape if not in charge'
+            liability_assessment['risk_level'] = 'MODERATE'
+            liability_assessment['action_required'] = 'Investigate actual role in operations'
+        
+        # Resigned directors
+        elif status == 'resigned':
+            liability_assessment['personal_liability'] = 'LOW - Not liable if resigned before offense'
+            liability_assessment['risk_level'] = 'LOW'
+            liability_assessment['action_required'] = 'Verify resignation date vs cheque date'
+        
+        analysis['director_liability'][name] = liability_assessment
+    
+    # Company vs Individual Liability Separation
+    analysis['liability_separation'] = {
+        'company_primary_liable': True,
+        'directors_vicariously_liable': len(directors) > 0,
+        'section_141_applicable': defendant_type == 'company',
+        'key_principle': 'Company is principal accused; directors liable if in charge and responsible for conduct of business'
+    }
+    
+    return analysis
+
+
+# ============================================================================
+# PAYMENT DISPUTE SYSTEM
+# ============================================================================
+
+def analyze_payment_dispute(case_data: Dict) -> Dict:
+    """
+    Analyze unpaid invoices, informal lending, business dues beyond cheque cases
+    """
+    
+    transaction_type = case_data.get('transaction_type', 'cheque_dishonour')
+    
+    analysis = {
+        'transaction_type': transaction_type,
+        'dispute_category': '',
+        'enforceability_score': 0,
+        'legal_remedy': '',
+        'evidence_required': [],
+        'challenges': []
+    }
+    
+    if transaction_type == 'unpaid_invoice':
+        analysis['dispute_category'] = 'Commercial Debt Recovery'
+        analysis['legal_remedy'] = 'Civil suit for recovery of debt'
+        analysis['evidence_required'] = [
+            'Original invoice with terms',
+            'Proof of delivery/service',
+            'Payment reminders sent',
+            'Acknowledgment of debt',
+            'Ledger/account statements'
+        ]
+        
+        has_invoice = case_data.get('has_invoice', False)
+        has_delivery_proof = case_data.get('has_delivery_proof', False)
+        has_acknowledgment = case_data.get('has_acknowledgment', False)
+        
+        score = 0
+        if has_invoice:
+            score += 40
+        if has_delivery_proof:
+            score += 30
+        if has_acknowledgment:
+            score += 30
+        
+        analysis['enforceability_score'] = score
+        
+        if score >= 70:
+            analysis['recommendation'] = 'Strong case for civil recovery'
+        elif score >= 40:
+            analysis['recommendation'] = 'Moderate case - strengthen documentation'
+        else:
+            analysis['recommendation'] = 'Weak case - high risk of failure'
+            analysis['challenges'].append('Insufficient documentary evidence')
+    
+    elif transaction_type == 'informal_lending':
+        analysis['dispute_category'] = 'Personal Loan Recovery'
+        analysis['legal_remedy'] = 'Summary suit under Order XXXVII CPC (if written agreement) or regular suit'
+        analysis['evidence_required'] = [
+            'Loan agreement (if any)',
+            'Bank transfer receipts',
+            'WhatsApp/email acknowledgments',
+            'Witness statements',
+            'Repayment history'
+        ]
+        
+        has_agreement = case_data.get('has_written_agreement', False)
+        has_bank_transfer = case_data.get('has_bank_transfer', False)
+        has_communication = case_data.get('has_communication_proof', False)
+        
+        score = 0
+        if has_agreement:
+            score += 50
+        if has_bank_transfer:
+            score += 30
+        if has_communication:
+            score += 20
+        
+        analysis['enforceability_score'] = score
+        
+        if not has_agreement:
+            analysis['challenges'].append('No written agreement - harder to prove terms')
+        if not has_bank_transfer:
+            analysis['challenges'].append('Cash transaction - difficult to establish money trail')
+        
+        if score >= 60:
+            analysis['recommendation'] = 'Proceed with civil suit'
+        else:
+            analysis['recommendation'] = 'High risk - consider settlement'
+    
+    elif transaction_type == 'business_dues':
+        analysis['dispute_category'] = 'Business-to-Business Debt'
+        analysis['legal_remedy'] = 'Commercial dispute resolution / Arbitration / Civil suit'
+        analysis['evidence_required'] = [
+            'Supply/service contract',
+            'Purchase orders',
+            'Delivery challans',
+            'Quality certificates',
+            'Correspondence trail'
+        ]
+        
+        has_contract = case_data.get('has_contract', False)
+        has_po = case_data.get('has_purchase_order', False)
+        has_delivery_proof = case_data.get('has_delivery_proof', False)
+        
+        score = 0
+        if has_contract:
+            score += 40
+        if has_po:
+            score += 30
+        if has_delivery_proof:
+            score += 30
+        
+        analysis['enforceability_score'] = score
+        
+        # Check for arbitration clause
+        if case_data.get('has_arbitration_clause'):
+            analysis['legal_remedy'] = 'Arbitration (mandatory as per contract)'
+            analysis['challenges'].append('Must follow arbitration procedure first')
+        
+        if score >= 70:
+            analysis['recommendation'] = 'Strong recovery case'
+        elif score >= 40:
+            analysis['recommendation'] = 'Proceed with caution'
+        else:
+            analysis['recommendation'] = 'Weak case - negotiate settlement'
+    
+    else:  # Default: cheque dishonour
+        analysis['dispute_category'] = 'Negotiable Instruments Act - Section 138'
+        analysis['enforceability_score'] = 85  # NI Act cases have strong enforceability
+        analysis['legal_remedy'] = 'Criminal complaint under Section 138 NI Act'
+    
+    return analysis
+
+
+# ============================================================================
+# DEFENCE & FAILURE ANALYSIS
+# ============================================================================
+
+def generate_defence_analysis(case_data: Dict, doc_intelligence: Dict) -> Dict:
+    """
+    Generate potential defences, strength scoring, and cross-examination risks
+    """
+    
+    defences = []
+    
+    # Defence 1: Security Cheque
+    security_defence = {
+        'defence_type': 'Security Cheque',
+        'description': 'Cheque was given as security, not against any debt',
+        'strength': 'Medium',
+        'strength_score': 50,
+        'rebuttal_available': False,
+        'cross_exam_risk': 'Medium',
+        'counter_strategy': []
+    }
+    
+    if case_data.get('has_written_agreement'):
+        security_defence['rebuttal_available'] = True
+        security_defence['counter_strategy'].append('Written agreement proves debt liability')
+        security_defence['strength_score'] = 30
+    else:
+        security_defence['counter_strategy'].append('No written agreement to disprove security cheque claim')
+        security_defence['strength_score'] = 70
+    
+    if case_data.get('has_invoice') or case_data.get('has_ledger'):
+        security_defence['rebuttal_available'] = True
+        security_defence['counter_strategy'].append('Documentary evidence of debt')
+        security_defence['strength_score'] -= 20
+    
+    defences.append(security_defence)
+    
+    # Defence 2: No Debt / No Consideration
+    no_debt_defence = {
+        'defence_type': 'No Debt / No Consideration',
+        'description': 'No legally enforceable debt existed',
+        'strength': 'High',
+        'strength_score': 70,
+        'rebuttal_available': False,
+        'cross_exam_risk': 'High',
+        'counter_strategy': []
+    }
+    
+    proof_of_debt = doc_intelligence.get('document_presence', {}).get('proof_of_debt', {})
+    if proof_of_debt.get('present') and proof_of_debt.get('strength') == 'Strong':
+        no_debt_defence['strength_score'] = 20
+        no_debt_defence['rebuttal_available'] = True
+        no_debt_defence['counter_strategy'].append('Strong documentary proof of debt available')
+    else:
+        no_debt_defence['counter_strategy'].append('CRITICAL: No strong proof of debt - defence likely to succeed')
+    
+    defences.append(no_debt_defence)
+    
+    # Defence 3: Cheque Misuse / Stolen
+    misuse_defence = {
+        'defence_type': 'Cheque Misuse / Unauthorized Use',
+        'description': 'Cheque was stolen/misused/amount filled without authorization',
+        'strength': 'Low',
+        'strength_score': 30,
+        'rebuttal_available': True,
+        'cross_exam_risk': 'Low',
+        'counter_strategy': ['Signature verification', 'Handwriting expert', 'Bank records']
+    }
+    
+    defences.append(misuse_defence)
+    
+    # Defence 4: Payment Already Made
+    payment_defence = {
+        'defence_type': 'Payment Already Made',
+        'description': 'Debt was already paid through other means',
+        'strength': 'Medium',
+        'strength_score': 50,
+        'rebuttal_available': False,
+        'cross_exam_risk': 'Medium',
+        'counter_strategy': []
+    }
+    
+    if case_data.get('has_bank_statement'):
+        payment_defence['counter_strategy'].append('Bank statements available to verify')
+        payment_defence['rebuttal_available'] = True
+    else:
+        payment_defence['counter_strategy'].append('WARNING: No bank records to disprove payment claim')
+    
+    defences.append(payment_defence)
+    
+    # Defence 5: Notice Not Received / Invalid
+    notice_defence = {
+        'defence_type': 'Notice Not Received / Invalid',
+        'description': 'Legal notice was not properly served or invalid',
+        'strength': 'Medium',
+        'strength_score': 40,
+        'rebuttal_available': False,
+        'cross_exam_risk': 'Medium',
+        'counter_strategy': []
+    }
+    
+    if case_data.get('notice_service_method') in ['Speed Post', 'Registered Post', 'Courier']:
+        notice_defence['rebuttal_available'] = True
+        notice_defence['counter_strategy'].append('Postal proof of service available')
+        notice_defence['strength_score'] = 20
+    else:
+        notice_defence['counter_strategy'].append('WARNING: Weak proof of service')
+        notice_defence['strength_score'] = 60
+    
+    defences.append(notice_defence)
+    
+    # Case Failure Probability
+    high_risk_defences = [d for d in defences if d['strength_score'] >= 60]
+    medium_risk_defences = [d for d in defences if 40 <= d['strength_score'] < 60]
+    
+    if len(high_risk_defences) >= 2:
+        failure_probability = 70
+        failure_risk = 'HIGH'
+    elif len(high_risk_defences) == 1:
+        failure_probability = 40
+        failure_risk = 'MEDIUM'
+    elif len(medium_risk_defences) >= 3:
+        failure_probability = 35
+        failure_risk = 'MEDIUM'
+    else:
+        failure_probability = 15
+        failure_risk = 'LOW'
+    
+    return {
+        'potential_defences': defences,
+        'high_risk_defences': [d['defence_type'] for d in high_risk_defences],
+        'medium_risk_defences': [d['defence_type'] for d in medium_risk_defences],
+        'overall_defence_risk': failure_risk,
+        'case_failure_probability': failure_probability,
+        'critical_weaknesses': [d['defence_type'] for d in defences if not d['rebuttal_available']],
+        'cross_examination_readiness': 'High' if len(high_risk_defences) == 0 else 'Medium' if len(high_risk_defences) <= 1 else 'Low'
+    }
+
+
+# ============================================================================
+# STRATEGY ENGINE
+# ============================================================================
+
+def generate_filing_strategy(case_strength: Dict, defence_analysis: Dict, recovery_analysis: Dict) -> Dict:
+    """
+    Generate comprehensive filing strategy with settlement recommendations
+    """
+    
+    overall_score = case_strength.get('overall_score', 0)
+    failure_prob = defence_analysis.get('case_failure_probability', 50)
+    recovery_prob = recovery_analysis.get('recovery_probability', 50)
+    
+    strategy = {
+        'recommended_approach': '',
+        'filing_decision': '',
+        'settlement_recommendation': {},
+        'pre_litigation_advice': [],
+        'evidence_improvement': [],
+        'timeline_strategy': []
+    }
+    
+    # Determine strategy based on scores
+    if overall_score >= 75 and failure_prob < 30:
+        strategy['recommended_approach'] = 'AGGRESSIVE'
+        strategy['filing_decision'] = 'FILE IMMEDIATELY'
+        strategy['settlement_recommendation'] = {
+            'recommend_settlement': False,
+            'reason': 'Strong case - proceed to trial for maximum recovery',
+            'settlement_timing': 'After filing, during trial if defendant shows willingness'
+        }
+        strategy['pre_litigation_advice'] = [
+            'Ensure all documents are properly attested',
+            'Prepare witness statements',
+            'File complaint without delay'
+        ]
+    
+    elif overall_score >= 50 and failure_prob < 50:
+        strategy['recommended_approach'] = 'BALANCED'
+        strategy['filing_decision'] = 'FILE WITH CAUTION'
+        strategy['settlement_recommendation'] = {
+            'recommend_settlement': True,
+            'reason': 'Moderate case - settlement may save time and costs',
+            'settlement_timing': 'Before filing or immediately after notice',
+            'settlement_amount': '60-80% of claim amount',
+            'settlement_terms': 'Structured payment with post-dated cheques or bank guarantee'
+        }
+        strategy['pre_litigation_advice'] = [
+            'Send strong legal notice demanding payment',
+            'Attempt one round of settlement negotiation',
+            'Gather additional supporting evidence if possible',
+            'File only if settlement fails'
+        ]
+    
+    else:
+        strategy['recommended_approach'] = 'SAFE / AVOID'
+        strategy['filing_decision'] = 'AVOID FILING' if overall_score < 30 else 'HIGH RISK - FILE ONLY IF NECESSARY'
+        strategy['settlement_recommendation'] = {
+            'recommend_settlement': True,
+            'reason': 'Weak case - trial likely to fail and incur costs',
+            'settlement_timing': 'Immediately, before formal proceedings',
+            'settlement_amount': '30-50% of claim amount',
+            'settlement_terms': 'Accept any reasonable offer to avoid total loss'
+        }
+        strategy['pre_litigation_advice'] = [
+            'CRITICAL: Strengthen evidence before proceeding',
+            'Consider alternative dispute resolution',
+            'Evaluate cost vs benefit carefully',
+            'Avoid litigation if possible'
+        ]
+    
+    # Evidence Improvement Suggestions
+    doc_gaps = case_strength.get('component_scores', {}).get('documentary_evidence', 100)
+    if doc_gaps < 70:
+        strategy['evidence_improvement'].append('Obtain written acknowledgment of debt')
+        strategy['evidence_improvement'].append('Collect all correspondence/WhatsApp messages')
+        strategy['evidence_improvement'].append('Secure witness statements')
+    
+    notice_score = case_strength.get('component_scores', {}).get('notice_compliance', 100)
+    if notice_score < 70:
+        strategy['evidence_improvement'].append('Ensure notice is sent via registered post')
+        strategy['evidence_improvement'].append('Keep postal receipts and tracking proof')
+    
+    if not strategy['evidence_improvement']:
+        strategy['evidence_improvement'].append('Evidence is adequate - no major improvements needed')
+    
+    # Timeline Strategy
+    timeline_score = case_strength.get('component_scores', {}).get('timeline_compliance', 100)
+    if timeline_score < 50:
+        strategy['timeline_strategy'].append('URGENT: File immediately to avoid limitation')
+    elif timeline_score < 80:
+        strategy['timeline_strategy'].append('File within 2-4 weeks to maintain safe margin')
+    else:
+        strategy['timeline_strategy'].append('Timeline is comfortable - can take time to prepare')
+    
+    return strategy
+
+
+# ============================================================================
+# OUTCOME PREDICTION
+# ============================================================================
+
+def predict_case_outcome(case_strength: Dict, defence_analysis: Dict, case_data: Dict) -> Dict:
+    """
+    Predict best case, worst case, most likely outcomes with success probability
+    """
+    
+    overall_score = case_strength.get('overall_score', 0)
+    failure_prob = defence_analysis.get('case_failure_probability', 50)
+    amount = case_data.get('cheque_amount', 0)
+    
+    # Success Probability
+    if overall_score >= 75 and failure_prob < 25:
+        success_probability = 85
+    elif overall_score >= 60 and failure_prob < 40:
+        success_probability = 65
+    elif overall_score >= 40 and failure_prob < 60:
+        success_probability = 40
+    else:
+        success_probability = 20
+    
+    # Best Case Outcome
+    best_case = {
+        'scenario': 'Complete Victory',
+        'probability': min(success_probability + 10, 95),
+        'outcome': f'Full recovery of ₹{indian_number_format(amount)}',
+        'additional_benefits': [
+            'Conviction of accused under Section 138',
+            'Compensation @ 2x cheque amount',
+            'Legal costs recovery',
+            'Interest on delayed payment'
+        ],
+        'timeline': '18-24 months from filing'
+    }
+    
+    # Worst Case Outcome
+    worst_case = {
+        'scenario': 'Case Dismissed',
+        'probability': failure_prob,
+        'outcome': 'No recovery, accused acquitted',
+        'consequences': [
+            'Legal costs wasted (₹50,000 - ₹2,00,000)',
+            'Time and effort lost',
+            'Possible costs awarded against complainant',
+            'Reputational impact'
+        ],
+        'timeline': '12-18 months wasted'
+    }
+    
+    # Most Likely Outcome
+    if success_probability >= 70:
+        most_likely = {
+            'scenario': 'Conviction with Recovery',
+            'probability': success_probability,
+            'outcome': f'Recovery of ₹{indian_number_format(amount * 0.8)} to ₹{indian_number_format(amount)}',
+            'details': 'Conviction likely, full or substantial recovery expected',
+            'timeline': '18-30 months'
+        }
+    elif success_probability >= 40:
+        most_likely = {
+            'scenario': 'Settlement During Trial',
+            'probability': 60,
+            'outcome': f'Settlement for ₹{indian_number_format(amount * 0.5)} to ₹{indian_number_format(amount * 0.7)}',
+            'details': 'Case proceeds to trial, defendant settles to avoid conviction',
+            'timeline': '12-18 months'
+        }
+    else:
+        most_likely = {
+            'scenario': 'Acquittal or Low Recovery',
+            'probability': 100 - success_probability,
+            'outcome': 'Acquittal or minimal recovery after long trial',
+            'details': 'Weak case likely to fail or result in compromise',
+            'timeline': '18-36 months'
+        }
+    
+    return {
+        'best_case': best_case,
+        'worst_case': worst_case,
+        'most_likely': most_likely,
+        'success_probability': success_probability,
+        'confidence_level': 'High' if success_probability >= 70 else 'Medium' if success_probability >= 40 else 'Low',
+        'risk_reward_ratio': 'Favorable' if success_probability >= 60 else 'Moderate' if success_probability >= 40 else 'Unfavorable'
+    }
+
+
+# ============================================================================
+# TIME & COST ANALYSIS
+# ============================================================================
+
+def analyze_time_and_cost(case_data: Dict, case_strength: Dict) -> Dict:
+    """
+    Estimate case duration, stage-wise timeline, legal costs, and cost vs recovery analysis
+    """
+    
+    amount = case_data.get('cheque_amount', 0)
+    
+    # Stage-wise Timeline
+    stages = {
+        'notice_period': {
+            'duration_days': 30,
+            'description': 'Legal notice + 15 days reply period'
+        },
+        'complaint_filing': {
+            'duration_days': 30,
+            'description': 'Drafting and filing complaint'
+        },
+        'process_issuance': {
+            'duration_days': 60,
+            'description': 'Court issues summons, accused appears'
+        },
+        'trial_commencement': {
+            'duration_days': 90,
+            'description': 'Evidence recording begins'
+        },
+        'prosecution_evidence': {
+            'duration_days': 180,
+            'description': 'Complainant witnesses examined'
+        },
+        'defence_evidence': {
+            'duration_days': 180,
+            'description': 'Accused defence (if any)'
+        },
+        'arguments': {
+            'duration_days': 60,
+            'description': 'Final arguments'
+        },
+        'judgment': {
+            'duration_days': 90,
+            'description': 'Judgment and sentencing'
+        }
+    }
+    
+    total_days = sum(s['duration_days'] for s in stages.values())
+    estimated_months = total_days // 30
+    
+    # Legal Cost Estimation
+    if amount <= 100000:  # <= 1 Lakh
+        lawyer_fees = (15000, 50000)
+        court_fees = 2000
+    elif amount <= 1000000:  # <= 10 Lakhs
+        lawyer_fees = (50000, 150000)
+        court_fees = 5000
+    elif amount <= 10000000:  # <= 1 Crore
+        lawyer_fees = (150000, 500000)
+        court_fees = 10000
+    else:  # > 1 Crore
+        lawyer_fees = (500000, 2000000)
+        court_fees = 25000
+    
+    misc_costs = 10000  # Documentation, travel, misc
+    
+    total_cost_min = lawyer_fees[0] + court_fees + misc_costs
+    total_cost_max = lawyer_fees[1] + court_fees + misc_costs
+    
+    # Cost vs Recovery Analysis
+    recovery_amount = amount  # Assuming full recovery in best case
+    
+    cost_benefit_ratio = (total_cost_max / amount * 100) if amount > 0 else 100
+    
+    if cost_benefit_ratio <= 10:
+        viability = 'HIGHLY VIABLE'
+        recommendation = 'Legal costs are minimal compared to claim amount'
+    elif cost_benefit_ratio <= 25:
+        viability = 'VIABLE'
+        recommendation = 'Costs are reasonable for the claim amount'
+    elif cost_benefit_ratio <= 50:
+        viability = 'MARGINAL'
+        recommendation = 'Consider settlement to avoid high legal costs'
+    else:
+        viability = 'NOT VIABLE'
+        recommendation = 'Legal costs too high - settlement strongly advised'
+    
+    return {
+        'estimated_duration': {
+            'total_months': estimated_months,
+            'total_days': total_days,
+            'range': f'{estimated_months - 6} to {estimated_months + 12} months'
+        },
+        'stage_wise_timeline': stages,
+        'legal_costs': {
+            'lawyer_fees_range': f'₹{indian_number_format(lawyer_fees[0])} - ₹{indian_number_format(lawyer_fees[1])}',
+            'court_fees': f'₹{indian_number_format(court_fees)}',
+            'miscellaneous': f'₹{indian_number_format(misc_costs)}',
+            'total_estimated_min': f'₹{indian_number_format(total_cost_min)}',
+            'total_estimated_max': f'₹{indian_number_format(total_cost_max)}'
+        },
+        'cost_vs_recovery': {
+            'claim_amount': f'₹{indian_number_format(amount)}',
+            'estimated_costs': f'₹{indian_number_format(total_cost_max)}',
+            'cost_percentage': f'{cost_benefit_ratio:.1f}%',
+            'net_recovery_min': f'₹{indian_number_format(max(0, amount - total_cost_max))}',
+            'viability': viability,
+            'recommendation': recommendation
+        }
+    }
+
+
+# ============================================================================
+# RECOVERY INTELLIGENCE
+# ============================================================================
+
+def analyze_recovery_intelligence(case_data: Dict, case_strength: Dict, outcome_prediction: Dict) -> Dict:
+    """
+    Analyze recovery probability, financial viability, and worth-filing decision
+    """
+    
+    amount = case_data.get('cheque_amount', 0)
+    success_prob = outcome_prediction.get('success_probability', 50)
+    defendant_type = case_data.get('defendant_type', 'individual')
+    
+    # Recovery Probability Factors
+    recovery_score = 50  # Base score
+    
+    # Factor 1: Case Strength
+    overall_score = case_strength.get('overall_score', 0)
+    recovery_score += (overall_score - 50) * 0.4
+    
+    # Factor 2: Defendant Profile
+    if defendant_type == 'company':
+        company_status = case_data.get('company_status', 'unknown')
+        if company_status == 'active':
+            recovery_score += 15
+        elif company_status == 'dormant':
+            recovery_score -= 10
+        else:
+            recovery_score -= 25
+    elif defendant_type == 'individual':
+        # Check employment/financial status if available
+        if case_data.get('defendant_employed', False):
+            recovery_score += 10
+        if case_data.get('defendant_has_assets', False):
+            recovery_score += 15
+    
+    # Factor 3: Amount Size
+    if amount <= 100000:
+        recovery_score -= 10  # Small amounts harder to recover
+    elif amount >= 1000000:
+        recovery_score += 10  # High amounts taken more seriously
+    
+    # Cap recovery score
+    recovery_score = max(0, min(100, recovery_score))
+    
+    # Recovery Classification
+    if recovery_score >= 70:
+        recovery_level = 'HIGH'
+        recovery_confidence = 'Strong recovery prospects'
+    elif recovery_score >= 40:
+        recovery_level = 'MEDIUM'
+        recovery_confidence = 'Moderate recovery prospects'
+    else:
+        recovery_level = 'LOW'
+        recovery_confidence = 'Weak recovery prospects'
+    
+    # Financial Viability Check
+    cost_viability = case_strength.get('cost_viability', 'VIABLE')
+    
+    # Worth Filing Decision
+    worth_filing = False
+    decision_reason = ''
+    
+    if overall_score >= 60 and recovery_score >= 50 and success_prob >= 50:
+        worth_filing = True
+        decision_reason = 'Strong case with good recovery prospects - FILE'
+    elif overall_score >= 40 and recovery_score >= 40:
+        worth_filing = True
+        decision_reason = 'Moderate case - FILE but attempt settlement'
+    elif recovery_score < 30:
+        worth_filing = False
+        decision_reason = 'Poor recovery prospects - NOT WORTH FILING'
+    elif overall_score < 30:
+        worth_filing = False
+        decision_reason = 'Weak case likely to fail - NOT WORTH FILING'
+    else:
+        worth_filing = True
+        decision_reason = 'Borderline case - FILE only if settlement fails'
+    
+    # Expected Recovery Amount
+    if success_prob >= 70:
+        expected_recovery_pct = 0.85
+    elif success_prob >= 50:
+        expected_recovery_pct = 0.65
+    elif success_prob >= 30:
+        expected_recovery_pct = 0.40
+    else:
+        expected_recovery_pct = 0.15
+    
+    expected_recovery = amount * expected_recovery_pct
+    
+    return {
+        'recovery_probability': recovery_score,
+        'recovery_level': recovery_level,
+        'recovery_confidence': recovery_confidence,
+        'expected_recovery_amount': f'₹{indian_number_format(expected_recovery)}',
+        'expected_recovery_percentage': f'{expected_recovery_pct * 100:.0f}%',
+        'worth_filing': worth_filing,
+        'filing_decision': decision_reason,
+        'financial_viability': cost_viability,
+        'key_factors': {
+            'case_strength': overall_score,
+            'success_probability': success_prob,
+            'defendant_reliability': 'Good' if recovery_score >= 60 else 'Moderate' if recovery_score >= 40 else 'Poor'
+        }
+    }
+
+
+# ============================================================================
+# MULTI-CASE COMPARISON & DASHBOARD
+# ============================================================================
+
+class CaseDatabase:
+    """In-memory database for storing and comparing multiple cases"""
+    
+    def __init__(self):
+        self.cases = {}
+    
+    def add_case(self, case_id: str, case_data: Dict, analysis: Dict):
+        """Add a case to the database"""
+        self.cases[case_id] = {
+            'case_data': case_data,
+            'analysis': analysis,
+            'timestamp': datetime.now().isoformat(),
+            'score': analysis.get('case_strength_score', {}).get('overall_score', 0)
+        }
+    
+    def get_case(self, case_id: str) -> Optional[Dict]:
+        """Retrieve a specific case"""
+        return self.cases.get(case_id)
+    
+    def compare_cases(self, case_ids: List[str]) -> Dict:
+        """Compare multiple cases"""
+        if not case_ids:
+            return {'error': 'No cases provided for comparison'}
+        
+        comparison = {
+            'cases': [],
+            'strongest_case': None,
+            'weakest_case': None,
+            'comparison_metrics': {}
+        }
+        
+        for case_id in case_ids:
+            case = self.get_case(case_id)
+            if case:
+                comparison['cases'].append({
+                    'case_id': case_id,
+                    'score': case.get('score', 0),
+                    'amount': case['case_data'].get('cheque_amount', 0),
+                    'status': case['analysis'].get('filing_recommendation', 'Unknown')
+                })
+        
+        if comparison['cases']:
+            # Sort by score
+            sorted_cases = sorted(comparison['cases'], key=lambda x: x['score'], reverse=True)
+            comparison['strongest_case'] = sorted_cases[0]
+            comparison['weakest_case'] = sorted_cases[-1]
+            
+            # Calculate metrics
+            scores = [c['score'] for c in comparison['cases']]
+            comparison['comparison_metrics'] = {
+                'average_score': sum(scores) / len(scores),
+                'score_range': f"{min(scores)} - {max(scores)}",
+                'total_amount': sum(c['amount'] for c in comparison['cases']),
+                'cases_ready_to_file': sum(1 for c in comparison['cases'] if c['score'] >= 60)
+            }
+        
+        return comparison
+    
+    def get_user_dashboard(self, user_email: str) -> Dict:
+        """Get dashboard for a specific user"""
+        user_cases = [c for c_id, c in self.cases.items() 
+                      if c['case_data'].get('user_email') == user_email]
+        
+        if not user_cases:
+            return {
+                'total_cases': 0,
+                'message': 'No cases found for this user'
+            }
+        
+        dashboard = {
+            'total_cases': len(user_cases),
+            'cases_by_strength': {
+                'excellent': sum(1 for c in user_cases if c['score'] >= 80),
+                'good': sum(1 for c in user_cases if 60 <= c['score'] < 80),
+                'moderate': sum(1 for c in user_cases if 40 <= c['score'] < 60),
+                'weak': sum(1 for c in user_cases if c['score'] < 40)
+            },
+            'total_claim_amount': sum(c['case_data'].get('cheque_amount', 0) for c in user_cases),
+            'recent_cases': sorted(user_cases, key=lambda x: x['timestamp'], reverse=True)[:10]
+        }
+        
+        return dashboard
+
+
+# Initialize global case database
+CASE_DB = CaseDatabase()
+
+
+# ============================================================================
+# PDF REPORT GENERATION
+# ============================================================================
+
+def generate_pdf_report(case_data: Dict, analysis: Dict, output_path: str = None) -> str:
+    """
+    Generate professional PDF report of case analysis
+    """
+    
+    if not REPORTLAB_AVAILABLE:
+        logger.warning("ReportLab not available - PDF generation skipped")
+        return "PDF generation not available - install reportlab"
+    
+    if output_path is None:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        output_path = f"/mnt/user-data/outputs/case_analysis_{timestamp}.pdf"
+    
+    # Create PDF
+    doc = SimpleDocTemplate(output_path, pagesize=A4)
+    styles = getSampleStyleSheet()
+    story = []
+    
+    # Title
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        textColor=colors.HexColor('#1a237e'),
+        spaceAfter=30,
+        alignment=TA_CENTER
+    )
+    story.append(Paragraph("JUDIQ AI - Case Analysis Report", title_style))
+    story.append(Spacer(1, 12))
+    
+    # Case Details
+    story.append(Paragraph("<b>Case Details</b>", styles['Heading2']))
+    case_info_data = [
+        ['Case ID:', analysis.get('case_id', 'N/A')],
+        ['Analysis Date:', datetime.now().strftime('%d %B %Y')],
+        ['Cheque Amount:', f"₹{indian_number_format(case_data.get('cheque_amount', 0))}"],
+        ['Cheque Date:', case_data.get('cheque_date', 'N/A')],
+        ['Dishonour Date:', case_data.get('dishonour_date', 'N/A')]
+    ]
+    
+    case_table = Table(case_info_data, colWidths=[150, 300])
+    case_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.grey),
+        ('TEXTCOLOR', (0, 0), (0, -1), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    story.append(case_table)
+    story.append(Spacer(1, 20))
+    
+    # Case Strength Score
+    strength = analysis.get('case_strength_score', {})
+    story.append(Paragraph("<b>Case Strength Score</b>", styles['Heading2']))
+    score_text = f"<b>Overall Score: {strength.get('overall_score', 0):.1f}/100</b><br/>"
+    score_text += f"Risk Level: {strength.get('risk_level', 'Unknown')}<br/>"
+    score_text += f"Recommendation: {strength.get('filing_recommendation', 'N/A')}"
+    story.append(Paragraph(score_text, styles['BodyText']))
+    story.append(Spacer(1, 20))
+    
+    # Outcome Prediction
+    outcome = analysis.get('outcome_prediction', {})
+    story.append(Paragraph("<b>Outcome Prediction</b>", styles['Heading2']))
+    
+    most_likely = outcome.get('most_likely', {})
+    outcome_text = f"Most Likely Scenario: {most_likely.get('scenario', 'Unknown')}<br/>"
+    outcome_text += f"Success Probability: {outcome.get('success_probability', 0)}%<br/>"
+    outcome_text += f"Expected Outcome: {most_likely.get('outcome', 'N/A')}"
+    story.append(Paragraph(outcome_text, styles['BodyText']))
+    story.append(Spacer(1, 20))
+    
+    # Filing Strategy
+    strategy = analysis.get('filing_strategy', {})
+    story.append(Paragraph("<b>Filing Strategy</b>", styles['Heading2']))
+    strategy_text = f"Approach: {strategy.get('recommended_approach', 'N/A')}<br/>"
+    strategy_text += f"Decision: {strategy.get('filing_decision', 'N/A')}"
+    story.append(Paragraph(strategy_text, styles['BodyText']))
+    
+    # Build PDF
+    doc.build(story)
+    
+    logger.info(f"PDF report generated: {output_path}")
+    return output_path
+
+
+# ============================================================================
+# FEEDBACK & LEARNING SYSTEM
+# ============================================================================
+
+class FeedbackSystem:
+    """System for capturing lawyer feedback and learning from usage patterns"""
+    
+    def __init__(self):
+        self.feedback_db = []
+        self.usage_patterns = defaultdict(int)
+    
+    def capture_feedback(self, case_id: str, feedback: Dict):
+        """Capture feedback from lawyers"""
+        feedback_entry = {
+            'case_id': case_id,
+            'timestamp': datetime.now().isoformat(),
+            'rating': feedback.get('rating', 0),
+            'was_helpful': feedback.get('was_helpful', False),
+            'accuracy': feedback.get('accuracy', 'unknown'),
+            'comments': feedback.get('comments', ''),
+            'actual_outcome': feedback.get('actual_outcome', '')
+        }
+        
+        self.feedback_db.append(feedback_entry)
+        
+        # Update usage patterns
+        self.usage_patterns['total_feedback'] += 1
+        if feedback_entry['was_helpful']:
+            self.usage_patterns['helpful_count'] += 1
+        
+        return {
+            'success': True,
+            'message': 'Feedback recorded successfully',
+            'feedback_id': len(self.feedback_db)
+        }
+    
+    def detect_patterns(self) -> Dict:
+        """Detect common issues and patterns from feedback"""
+        if not self.feedback_db:
+            return {'message': 'No feedback data available yet'}
+        
+        patterns = {
+            'total_feedback': len(self.feedback_db),
+            'average_rating': sum(f['rating'] for f in self.feedback_db) / len(self.feedback_db),
+            'helpfulness_rate': (self.usage_patterns['helpful_count'] / 
+                               self.usage_patterns['total_feedback'] * 100),
+            'common_issues': []
+        }
+        
+        # Analyze comments for common themes
+        comments = [f['comments'].lower() for f in self.feedback_db if f['comments']]
+        
+        common_keywords = ['timeline', 'document', 'notice', 'score', 'strategy']
+        for keyword in common_keywords:
+            count = sum(1 for c in comments if keyword in c)
+            if count >= 3:
+                patterns['common_issues'].append({
+                    'keyword': keyword,
+                    'frequency': count,
+                    'percentage': (count / len(comments) * 100) if comments else 0
+                })
+        
+        return patterns
+    
+    def get_improvement_suggestions(self) -> List[str]:
+        """Generate improvement suggestions based on feedback"""
+        patterns = self.detect_patterns()
+        
+        suggestions = []
+        
+        if patterns.get('average_rating', 5) < 3:
+            suggestions.append("Overall ratings are low - review analysis accuracy")
+        
+        if patterns.get('helpfulness_rate', 100) < 60:
+            suggestions.append("Many users find analysis not helpful - improve recommendations")
+        
+        common_issues = patterns.get('common_issues', [])
+        for issue in common_issues:
+            if issue['frequency'] >= 5:
+                suggestions.append(f"Frequent mentions of '{issue['keyword']}' - review this module")
+        
+        if not suggestions:
+            suggestions.append("No major issues detected - system performing well")
+        
+        return suggestions
+
+
+# Initialize feedback system
+FEEDBACK_SYSTEM = FeedbackSystem()
+
+
+# ============================================================================
+# ENHANCED MAIN ANALYSIS FUNCTION
+# ============================================================================
+
+def run_enhanced_analysis(case_data: Dict) -> Dict:
+    """
+    Run complete enhanced analysis with all new features
+    """
+    
+    logger.info("Starting enhanced analysis...")
+    
+    # Run base analysis (existing function)
+    base_analysis = run_complete_analysis(case_data)
+    
+    # Add enhanced features
+    enhanced_analysis = base_analysis.copy()
+    
+    # 1. Case Strength Scoring
+    if CASE_STRENGTH_SCORING:
+        logger.info("Calculating case strength score...")
+        enhanced_analysis['case_strength_score'] = calculate_case_strength_score(
+            case_data, 
+            base_analysis.get('modules', {})
+        )
+    
+    # 2. Document Intelligence
+    if DOCUMENT_INTELLIGENCE:
+        logger.info("Analyzing document intelligence...")
+        enhanced_analysis['document_intelligence'] = analyze_document_intelligence(case_data)
+    
+    # 3. Director & Company Liability
+    if DIRECTOR_LIABILITY_ANALYSIS:
+        logger.info("Analyzing director liability...")
+        enhanced_analysis['director_liability'] = analyze_director_liability(case_data)
+    
+    # 4. Payment Dispute System
+    if PAYMENT_DISPUTE_SYSTEM:
+        logger.info("Analyzing payment dispute...")
+        enhanced_analysis['payment_dispute'] = analyze_payment_dispute(case_data)
+    
+    # 5. Defence & Failure Analysis
+    if DEFENCE_GENERATOR:
+        logger.info("Generating defence analysis...")
+        enhanced_analysis['defence_analysis'] = generate_defence_analysis(
+            case_data,
+            enhanced_analysis.get('document_intelligence', {})
+        )
+    
+    # 6. Strategy Engine
+    if STRATEGY_ENGINE:
+        logger.info("Generating filing strategy...")
+        enhanced_analysis['filing_strategy'] = generate_filing_strategy(
+            enhanced_analysis.get('case_strength_score', {}),
+            enhanced_analysis.get('defence_analysis', {}),
+            enhanced_analysis.get('recovery_intelligence', {})
+        )
+    
+    # 7. Outcome Prediction
+    if OUTCOME_PREDICTION:
+        logger.info("Predicting case outcomes...")
+        enhanced_analysis['outcome_prediction'] = predict_case_outcome(
+            enhanced_analysis.get('case_strength_score', {}),
+            enhanced_analysis.get('defence_analysis', {}),
+            case_data
+        )
+    
+    # 8. Time & Cost Analysis
+    if TIME_COST_ANALYSIS:
+        logger.info("Analyzing time and cost...")
+        enhanced_analysis['time_cost_analysis'] = analyze_time_and_cost(
+            case_data,
+            enhanced_analysis.get('case_strength_score', {})
+        )
+    
+    # 9. Recovery Intelligence
+    if RECOVERY_INTELLIGENCE:
+        logger.info("Analyzing recovery intelligence...")
+        enhanced_analysis['recovery_intelligence'] = analyze_recovery_intelligence(
+            case_data,
+            enhanced_analysis.get('case_strength_score', {}),
+            enhanced_analysis.get('outcome_prediction', {})
+        )
+    
+    # 10. Store in case database
+    if MULTI_CASE_COMPARISON:
+        case_id = enhanced_analysis.get('case_id', f"CASE_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+        CASE_DB.add_case(case_id, case_data, enhanced_analysis)
+    
+    # 11. Generate PDF Report
+    if PDF_REPORT_GENERATION and REPORTLAB_AVAILABLE:
+        try:
+            pdf_path = generate_pdf_report(case_data, enhanced_analysis)
+            enhanced_analysis['pdf_report_path'] = pdf_path
+        except Exception as e:
+            logger.error(f"PDF generation failed: {e}")
+            enhanced_analysis['pdf_report_path'] = None
+    
+    # Add metadata
+    enhanced_analysis['engine_version'] = ENGINE_VERSION
+    enhanced_analysis['enhanced_features'] = {
+        'case_strength_scoring': CASE_STRENGTH_SCORING,
+        'document_intelligence': DOCUMENT_INTELLIGENCE,
+        'director_liability': DIRECTOR_LIABILITY_ANALYSIS,
+        'payment_disputes': PAYMENT_DISPUTE_SYSTEM,
+        'defence_generator': DEFENCE_GENERATOR,
+        'strategy_engine': STRATEGY_ENGINE,
+        'outcome_prediction': OUTCOME_PREDICTION,
+        'time_cost_analysis': TIME_COST_ANALYSIS,
+        'recovery_intelligence': RECOVERY_INTELLIGENCE
+    }
+    
+    # Generate Executive Summary
+    enhanced_analysis['executive_summary'] = generate_executive_summary(enhanced_analysis)
+    
+    logger.info("Enhanced analysis completed successfully")
+    
+    return enhanced_analysis
+
+
+def generate_executive_summary(analysis: Dict) -> str:
+    """
+    Auto-generate executive summary of the complete analysis
+    """
+    
+    summary_lines = []
+    
+    # Header
+    summary_lines.append("=" * 70)
+    summary_lines.append("EXECUTIVE SUMMARY - CASE ANALYSIS")
+    summary_lines.append("=" * 70)
+    summary_lines.append("")
+    
+    # Case Strength
+    strength = analysis.get('case_strength_score', {})
+    overall_score = strength.get('overall_score', 0)
+    risk_level = strength.get('risk_level', 'Unknown')
+    
+    summary_lines.append(f"📊 CASE STRENGTH: {overall_score:.1f}/100 - {risk_level}")
+    summary_lines.append(f"   Filing Recommendation: {strength.get('filing_recommendation', 'N/A')}")
+    summary_lines.append("")
+    
+    # Success Probability
+    outcome = analysis.get('outcome_prediction', {})
+    success_prob = outcome.get('success_probability', 0)
+    
+    summary_lines.append(f"🎯 SUCCESS PROBABILITY: {success_prob}%")
+    
+    most_likely = outcome.get('most_likely', {})
+    summary_lines.append(f"   Most Likely Outcome: {most_likely.get('scenario', 'Unknown')}")
+    summary_lines.append(f"   Expected Result: {most_likely.get('outcome', 'N/A')}")
+    summary_lines.append("")
+    
+    # Recovery Intelligence
+    recovery = analysis.get('recovery_intelligence', {})
+    recovery_prob = recovery.get('recovery_probability', 0)
+    
+    summary_lines.append(f"💰 RECOVERY PROSPECTS: {recovery_prob:.0f}/100 - {recovery.get('recovery_level', 'Unknown')}")
+    summary_lines.append(f"   Expected Recovery: {recovery.get('expected_recovery_amount', 'N/A')}")
+    summary_lines.append(f"   Worth Filing: {'YES' if recovery.get('worth_filing', False) else 'NO'}")
+    summary_lines.append("")
+    
+    # Time & Cost
+    time_cost = analysis.get('time_cost_analysis', {})
+    duration = time_cost.get('estimated_duration', {})
+    
+    summary_lines.append(f"⏱️  ESTIMATED DURATION: {duration.get('total_months', 'Unknown')} months")
+    
+    costs = time_cost.get('legal_costs', {})
+    summary_lines.append(f"   Estimated Costs: {costs.get('total_estimated_min', 'N/A')} to {costs.get('total_estimated_max', 'N/A')}")
+    summary_lines.append("")
+    
+    # Strategy
+    strategy = analysis.get('filing_strategy', {})
+    summary_lines.append(f"📋 RECOMMENDED STRATEGY: {strategy.get('recommended_approach', 'Unknown')}")
+    summary_lines.append(f"   Filing Decision: {strategy.get('filing_decision', 'N/A')}")
+    
+    settlement = strategy.get('settlement_recommendation', {})
+    if settlement.get('recommend_settlement', False):
+        summary_lines.append(f"   Settlement: RECOMMENDED - {settlement.get('settlement_amount', 'Negotiate')}")
+    else:
+        summary_lines.append(f"   Settlement: Not recommended - proceed to trial")
+    summary_lines.append("")
+    
+    # Critical Issues
+    defence = analysis.get('defence_analysis', {})
+    high_risk_defences = defence.get('high_risk_defences', [])
+    
+    if high_risk_defences:
+        summary_lines.append(f"⚠️  CRITICAL RISKS:")
+        for defence_type in high_risk_defences:
+            summary_lines.append(f"   • {defence_type}")
+        summary_lines.append("")
+    
+    # Document Gaps
+    doc_intel = analysis.get('document_intelligence', {})
+    critical_gaps = doc_intel.get('critical_gaps', [])
+    
+    if critical_gaps:
+        summary_lines.append(f"📄 CRITICAL DOCUMENT GAPS:")
+        for gap in critical_gaps:
+            summary_lines.append(f"   • {gap.title()} missing")
+        summary_lines.append("")
+    
+    # Final Verdict
+    summary_lines.append("=" * 70)
+    summary_lines.append("FINAL VERDICT:")
+    summary_lines.append("=" * 70)
+    
+    if overall_score >= 70 and success_prob >= 60:
+        verdict = "✅ STRONG CASE - PROCEED WITH FILING"
+        details = "High probability of success. Case is ready for litigation."
+    elif overall_score >= 50 and success_prob >= 40:
+        verdict = "⚠️  MODERATE CASE - ATTEMPT SETTLEMENT FIRST"
+        details = "Reasonable chance of success. Settlement may be prudent."
+    else:
+        verdict = "❌ WEAK CASE - HIGH RISK OF FAILURE"
+        details = "Low probability of success. Avoid litigation or strengthen case significantly."
+    
+    summary_lines.append(verdict)
+    summary_lines.append(details)
+    summary_lines.append("=" * 70)
+    
+    return "\n".join(summary_lines)
+
+
 USAGE_LOG = []
 
 def get_usage_analytics() -> Dict:
@@ -20104,8 +21761,221 @@ def create_app():
             'status': 'healthy',
             'engine_version': ENGINE_VERSION,
             'firebase_enabled': db is not None,
+            'enhanced_features': {
+                'case_strength_scoring': CASE_STRENGTH_SCORING,
+                'document_intelligence': DOCUMENT_INTELLIGENCE,
+                'director_liability': DIRECTOR_LIABILITY_ANALYSIS,
+                'payment_disputes': PAYMENT_DISPUTE_SYSTEM,
+                'defence_generator': DEFENCE_GENERATOR,
+                'strategy_engine': STRATEGY_ENGINE,
+                'outcome_prediction': OUTCOME_PREDICTION,
+                'time_cost_analysis': TIME_COST_ANALYSIS,
+                'recovery_intelligence': RECOVERY_INTELLIGENCE,
+                'multi_case_comparison': MULTI_CASE_COMPARISON,
+                'pdf_reports': PDF_REPORT_GENERATION
+            },
             'timestamp': datetime.now().isoformat()
         }), 200
+    
+    @app.route('/api/analyze/enhanced', methods=['POST', 'OPTIONS'])
+    def analyze_case_enhanced():
+        """Enhanced analysis endpoint with all new features"""
+        if request.method == 'OPTIONS':
+            return '', 204
+        
+        try:
+            case_data = request.get_json()
+            if not case_data:
+                return jsonify({
+                    'success': False,
+                    'error': 'No case data provided'
+                }), 400
+            
+            # Run enhanced analysis
+            logger.info("Running enhanced analysis...")
+            analysis_result = run_enhanced_analysis(case_data)
+            
+            # Generate case ID
+            if 'case_id' not in analysis_result:
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                analysis_result['case_id'] = f"CASE_{timestamp}"
+            
+            # Save to Firebase if available
+            user_email = case_data.get('user_email')
+            if db and user_email:
+                try:
+                    doc_ref = db.collection('enhanced_analyses').document(analysis_result['case_id'])
+                    doc_ref.set({
+                        'case_id': analysis_result['case_id'],
+                        'user_email': user_email,
+                        'timestamp': firestore.SERVER_TIMESTAMP,
+                        'case_data': case_data,
+                        'analysis': analysis_result,
+                        'score': analysis_result.get('case_strength_score', {}).get('overall_score', 0),
+                        'recovery_probability': analysis_result.get('recovery_intelligence', {}).get('recovery_probability', 0)
+                    })
+                    logger.info(f"Saved enhanced analysis to Firebase: {analysis_result['case_id']}")
+                except Exception as e:
+                    logger.error(f"Firebase save error: {e}")
+            
+            return jsonify({
+                'success': True,
+                'analysis': analysis_result,
+                'engine_version': ENGINE_VERSION,
+                'timestamp': datetime.now().isoformat()
+            }), 200
+            
+        except Exception as e:
+            logger.error(f"Enhanced analysis error: {e}")
+            logger.error(traceback.format_exc())
+            return jsonify({
+                'success': False,
+                'error': str(e),
+                'user_friendly_message': 'Enhanced analysis failed. Please check your input data.'
+            }), 500
+    
+    @app.route('/api/case/compare', methods=['POST', 'OPTIONS'])
+    def compare_cases():
+        """Compare multiple cases"""
+        if request.method == 'OPTIONS':
+            return '', 204
+        
+        try:
+            data = request.get_json()
+            case_ids = data.get('case_ids', [])
+            
+            if not case_ids:
+                return jsonify({
+                    'success': False,
+                    'error': 'No case IDs provided'
+                }), 400
+            
+            comparison = CASE_DB.compare_cases(case_ids)
+            
+            return jsonify({
+                'success': True,
+                'comparison': comparison
+            }), 200
+            
+        except Exception as e:
+            logger.error(f"Case comparison error: {e}")
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+    
+    @app.route('/api/user/dashboard/<email>', methods=['GET', 'OPTIONS'])
+    def get_user_dashboard(email):
+        """Get user dashboard with case statistics"""
+        if request.method == 'OPTIONS':
+            return '', 204
+        
+        try:
+            dashboard = CASE_DB.get_user_dashboard(email)
+            
+            return jsonify({
+                'success': True,
+                'dashboard': dashboard
+            }), 200
+            
+        except Exception as e:
+            logger.error(f"Dashboard error: {e}")
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+    
+    @app.route('/api/feedback', methods=['POST', 'OPTIONS'])
+    def submit_feedback():
+        """Submit feedback for a case analysis"""
+        if request.method == 'OPTIONS':
+            return '', 204
+        
+        try:
+            feedback_data = request.get_json()
+            case_id = feedback_data.get('case_id')
+            
+            if not case_id:
+                return jsonify({
+                    'success': False,
+                    'error': 'Case ID required'
+                }), 400
+            
+            result = FEEDBACK_SYSTEM.capture_feedback(case_id, feedback_data)
+            
+            return jsonify({
+                'success': True,
+                'result': result
+            }), 200
+            
+        except Exception as e:
+            logger.error(f"Feedback submission error: {e}")
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+    
+    @app.route('/api/feedback/patterns', methods=['GET', 'OPTIONS'])
+    def get_feedback_patterns():
+        """Get feedback patterns and improvement suggestions"""
+        if request.method == 'OPTIONS':
+            return '', 204
+        
+        try:
+            patterns = FEEDBACK_SYSTEM.detect_patterns()
+            suggestions = FEEDBACK_SYSTEM.get_improvement_suggestions()
+            
+            return jsonify({
+                'success': True,
+                'patterns': patterns,
+                'suggestions': suggestions
+            }), 200
+            
+        except Exception as e:
+            logger.error(f"Pattern detection error: {e}")
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+    
+    @app.route('/api/case/pdf-report/<case_id>', methods=['GET', 'OPTIONS'])
+    def download_pdf_report(case_id):
+        """Generate and download PDF report for a case"""
+        if request.method == 'OPTIONS':
+            return '', 204
+        
+        try:
+            case = CASE_DB.get_case(case_id)
+            if not case:
+                return jsonify({
+                    'success': False,
+                    'error': 'Case not found'
+                }), 404
+            
+            if not REPORTLAB_AVAILABLE:
+                return jsonify({
+                    'success': False,
+                    'error': 'PDF generation not available'
+                }), 503
+            
+            pdf_path = generate_pdf_report(
+                case['case_data'],
+                case['analysis'],
+                f"/mnt/user-data/outputs/case_report_{case_id}.pdf"
+            )
+            
+            return jsonify({
+                'success': True,
+                'pdf_path': pdf_path,
+                'message': 'PDF report generated successfully'
+            }), 200
+            
+        except Exception as e:
+            logger.error(f"PDF generation error: {e}")
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
     
     return app
 
@@ -20116,19 +21986,93 @@ if __name__ == '__main__':
         print(f"""
 ╔════════════════════════════════════════════════════════════════╗
 ║                     JUDIQ AI API SERVER                        ║
-║                  Legal Analysis Engine {ENGINE_VERSION}                 ║
+║            Legal Analysis Engine {ENGINE_VERSION} ENHANCED            ║
 ╚════════════════════════════════════════════════════════════════╝
 
-Server starting on http://localhost:5000
-API Endpoints:
-  POST   /api/analyze              - Run case analysis
+🚀 Server starting on http://localhost:5000
+
+📊 ENHANCED FEATURES:
+  ✅ Case Strength Scoring (0-100)
+  ✅ Document Intelligence & Contradiction Detection
+  ✅ Director & Company Liability Analysis
+  ✅ Payment Dispute Systems (Invoice/Lending/Business)
+  ✅ Defence Generator & Failure Analysis
+  ✅ Strategy Engine with Settlement Recommendations
+  ✅ Outcome Prediction & Success Probability
+  ✅ Time & Cost Analysis
+  ✅ Recovery Intelligence
+  ✅ Multi-Case Comparison Dashboard
+  ✅ PDF Report Generation
+  ✅ Feedback & Learning System
+
+📡 API ENDPOINTS:
+
+  CORE ANALYSIS:
+  POST   /api/analyze              - Standard case analysis
+  POST   /api/analyze/enhanced     - Enhanced analysis (all features)
+
+  USER MANAGEMENT:
   GET    /api/user/case-history/<email> - Get case history
   GET    /api/user/usage/<email>   - Get usage quota
-  GET    /api/health               - Health check
+  GET    /api/user/dashboard/<email> - User dashboard & statistics
+
+  CASE COMPARISON:
+  POST   /api/case/compare         - Compare multiple cases
+  GET    /api/case/pdf-report/<case_id> - Generate PDF report
+
+  FEEDBACK SYSTEM:
+  POST   /api/feedback             - Submit case feedback
+  GET    /api/feedback/patterns    - Get feedback patterns
+
+  SYSTEM:
+  GET    /api/health               - Health check & feature status
+
+📖 USAGE EXAMPLE:
+  curl -X POST http://localhost:5000/api/analyze/enhanced \\
+    -H "Content-Type: application/json" \\
+    -d '{
+      "user_email": "lawyer@example.com",
+      "cheque_amount": 500000,
+      "cheque_date": "2024-01-15",
+      "dishonour_date": "2024-02-01",
+      "notice_date": "2024-02-10"
+    }'
 
 Press CTRL+C to stop
 """)
         app.run(host='0.0.0.0', port=5000, debug=True)
     else:
-        print("ERROR: Flask not installed. Install with: pip install flask flask-cors")
-        print("Optional: pip install firebase-admin (for Firebase features)")
+        print("""
+╔════════════════════════════════════════════════════════════════╗
+║                    JUDIQ AI - ENHANCED EDITION                 ║
+║                     Command Line Interface                     ║
+╚════════════════════════════════════════════════════════════════╝
+
+ERROR: Flask not installed. Install with:
+  pip install flask flask-cors
+
+OPTIONAL DEPENDENCIES:
+  pip install firebase-admin    # For cloud storage
+  pip install reportlab          # For PDF generation
+  pip install pandas             # For data analysis
+
+CURRENT STATUS:
+  ✅ Core Analysis Engine: READY
+  ⚠️  API Server: Flask not installed
+  ⚠️  PDF Reports: {('READY' if REPORTLAB_AVAILABLE else 'ReportLab not installed')}
+  ⚠️  Cloud Storage: {('READY' if FIREBASE_AVAILABLE else 'Firebase not installed')}
+
+To use the enhanced analysis engine programmatically:
+  
+  from judiq import run_enhanced_analysis
+  
+  case_data = {{
+      'cheque_amount': 500000,
+      'cheque_date': '2024-01-15',
+      'dishonour_date': '2024-02-01',
+      'notice_date': '2024-02-10'
+  }}
+  
+  result = run_enhanced_analysis(case_data)
+  print(result)
+""")
