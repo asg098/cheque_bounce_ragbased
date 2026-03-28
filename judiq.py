@@ -237,26 +237,73 @@ def format_case_output(data):
 
 
 def sanitize_text(text: str) -> str:
-    """
-    Extra safety for any leftover text - catches remaining "Missing" patterns.
-    This is a safety net after display_value() and clean_output_data().
-    """
     if not isinstance(text, str):
         return text
-    
-    # Remove all Missing variations
     text = text.replace('Missing Missing Missing', '')
     text = text.replace('Missing Missing', '')
     text = text.replace('Missing - Missing', '')
     text = text.replace('- Missing', '')
     text = text.replace('Missing -', '')
-    text = ' '.join(text.split())  # Normalize whitespace
-    
-    # If only "Missing" remains, return empty
+    text = ' '.join(text.split())
     if text.strip().lower() == 'missing':
         return ''
-    
     return text
+
+
+def deduplicate_list(items):
+    if not items or not isinstance(items, list):
+        return []
+    seen = set()
+    result = []
+    for item in items:
+        if not item:
+            continue
+        item_key = str(item).strip().lower()
+        if item_key not in seen:
+            seen.add(item_key)
+            result.append(item)
+    return result
+
+
+def remove_formatting_artifacts(text):
+    if not isinstance(text, str):
+        return text
+    text = text.replace('? ', '')
+    text = text.replace('- ', '')
+    text = text.replace('⚠️', '')
+    text = text.replace('⚠', '')
+    text = text.replace('❌', '')
+    text = text.replace('⚡', '')
+    text = text.replace('🔴', '')
+    text = text.replace('✗', '')
+    text = text.replace('✓', '')
+    return text.strip()
+
+
+def final_clean(report):
+    if not isinstance(report, dict):
+        return report
+    
+    def clean_value(v):
+        if isinstance(v, str):
+            v = remove_formatting_artifacts(v)
+            v = sanitize_text(v)
+            return v.strip() if v else ""
+        elif isinstance(v, list):
+            cleaned = [clean_value(x) for x in v]
+            cleaned = [x for x in cleaned if x]
+            return deduplicate_list(cleaned)
+        elif isinstance(v, dict):
+            return final_clean(v)
+        return v
+    
+    cleaned_report = {}
+    for k, v in report.items():
+        cleaned_v = clean_value(v)
+        if cleaned_v not in [None, "", [], {}]:
+            cleaned_report[k] = cleaned_v
+    
+    return cleaned_report
 
 
 def format_timeline_transparency(timeline_data: Dict) -> Dict:
@@ -21454,7 +21501,7 @@ def run_enhanced_analysis(case_data: Dict) -> Dict:
     
     logger.info("Enhanced analysis completed successfully")
     
-    return enhanced_analysis
+    return final_clean(enhanced_analysis)
 
 
 def generate_executive_summary(analysis: Dict) -> str:
@@ -21703,6 +21750,7 @@ def create_app():
             # Run analysis
             logger.info("Running analysis...")
             analysis_result = run_complete_analysis(case_data)
+            analysis_result = final_clean(analysis_result)
             
             # Generate case ID
             if 'case_id' not in analysis_result:
