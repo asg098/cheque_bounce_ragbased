@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import hashlib
 import json
 import logging
@@ -131,54 +132,66 @@ def safe_get(data: Dict, *keys, default=None):
     return result if result is not None else default
 
 
-def display_value(value, label=None, value_type='text'):
+def display_value(value, value_type='text'):
     """
-    SINGLE POINT OF TRUTH for displaying values.
-    
-    This is where "Missing" appears - ONLY HERE, NEVER in data layer.
-    
-    Args:
-        value: The actual data value (None, bool, str, number, etc.)
-        label: Optional label for the field
-        value_type: Type of value for special formatting ('text', 'bool', 'score', 'amount')
-    
-    Returns:
-        Clean display string
+    STRONGEST VERSION - Completely removes ALL 'Missing' text variations.
+    This is the FINAL version that handles all edge cases.
     """
-    # Handle None/empty - this is where we say "Missing" or return empty
     if value is None or value == "" or value == [] or value == {}:
-        return ""  # Return empty, not "Missing"
+        return ""
     
-    # Handle booleans
     if isinstance(value, bool):
         return "Yes" if value else "No"
     
-    # Handle numbers
     if isinstance(value, (int, float)):
-        if isinstance(value, float) and value != value:  # NaN
+        if isinstance(value, float) and value != value:  # NaN check
             return ""
-        if value_type == 'score':
-            return f"{value:.1f}/100"
         if value_type == 'amount':
             return f"₹{indian_number_format(value)}"
+        if value_type == 'score':
+            return f"{value:.1f}/100"
         return str(value)
     
-    # Handle strings - just return as-is (should already be clean from data layer)
     if isinstance(value, str):
-        # Safety: if somehow "Missing" got into data, remove it
-        if value.lower() == 'missing':
+        text = value.strip()
+        # Remove ALL variations of Missing
+        text = text.replace('Missing Missing Missing', '')
+        text = text.replace('Missing Missing', '')
+        text = text.replace('Missing - Missing', '')
+        text = text.replace('- Missing', '')
+        text = text.replace('Missing -', '')
+        text = text.replace('Missing', '').strip()
+        if not text or text in ['-', '--', '—']:
             return ""
-        return value.strip()
+        return text
     
-    # Handle lists
     if isinstance(value, list):
-        return [display_value(item, None, value_type) for item in value if display_value(item, None, value_type)]
+        cleaned = [display_value(item, value_type) for item in value]
+        return [item for item in cleaned if item]
     
-    # Handle dicts
     if isinstance(value, dict):
-        return {k: display_value(v, None, value_type) for k, v in value.items()}
+        return {k: display_value(v, value_type) for k, v in value.items() if display_value(v, value_type)}
     
     return str(value)
+
+
+def clean_output_data(data):
+    """
+    FINAL CLEANUP - Call this at the very end before returning data.
+    Recursively cleans all nested structures.
+    """
+    if isinstance(data, dict):
+        cleaned = {}
+        for k, v in data.items():
+            cleaned_value = clean_output_data(v)
+            if cleaned_value not in [None, "", [], {}]:
+                cleaned[k] = cleaned_value
+        return cleaned
+    elif isinstance(data, list):
+        cleaned = [clean_output_data(item) for item in data]
+        return [item for item in cleaned if item not in [None, "", [], {}]]
+    else:
+        return display_value(data)
 
 
 def clean_list(items):
@@ -254,67 +267,23 @@ def format_case_output(data):
 
 def sanitize_text(text: str) -> str:
     """
-    Global text sanitizer to eliminate all 'Missing Missing' patterns and clean up text.
-    This is the FINAL fix to prevent any 'Missing' duplication from reaching the output.
+    Extra safety for any leftover text - catches remaining "Missing" patterns.
+    This is a safety net after display_value() and clean_output_data().
     """
-    if not text or not isinstance(text, str):
+    if not isinstance(text, str):
         return text
     
-    # AGGRESSIVE MULTI-PASS CLEANUP
-    max_iterations = 15
-    for _ in range(max_iterations):
-        prev = text
-        
-        # Remove all variations of "Missing Missing" and similar patterns
-        text = text.replace('Missing Missing Missing Missing', '')
-        text = text.replace('Missing Missing Missing', '')
-        text = text.replace('Missing Missing', '')
-        text = text.replace('Missing - Missing', '')
-        text = text.replace('Missing  Missing', '')
-        text = text.replace('- Missing Missing', '')
-        text = text.replace('Missing Missing -', '')
-        text = text.replace('Missing -', '')
-        text = text.replace('- Missing', '')
-        
-        # Remove patterns like "- - Missing"
-        text = text.replace('- - Missing', '')
-        text = text.replace('- Missing - -', '')
-        
-        # If no change, we're done
-        if text == prev:
-            break
+    # Remove all Missing variations
+    text = text.replace('Missing Missing Missing', '')
+    text = text.replace('Missing Missing', '')
+    text = text.replace('Missing - Missing', '')
+    text = text.replace('- Missing', '')
+    text = text.replace('Missing -', '')
+    text = ' '.join(text.split())  # Normalize whitespace
     
-    # Context-aware replacements for standalone "Missing"
-    text = text.replace('Missing written agreement', 'No written agreement')
-    text = text.replace('Missing financial records', 'No financial records')
-    text = text.replace('Missing rebuttal evidence', 'No rebuttal evidence')
-    text = text.replace('Missing postal receipt', 'No postal proof')
-    text = text.replace('Missing proof of debt', 'No proof of debt')
-    text = text.replace('Missing documentary', 'No documentary evidence')
-    text = text.replace('Missing legally enforceable', 'No legally enforceable debt proven')
-    
-    # Remove duplicate "Present Present"
-    text = text.replace('Present Present Present', 'Present')
-    text = text.replace('Present Present', 'Present')
-    text = text.replace('Present - Present', 'Present')
-    
-    # Clean up multiple dashes and spaces
-    text = text.replace('- - - ', ' ')
-    text = text.replace('- - ', ' ')
-    text = text.replace(' - - ', ' ')
-    text = text.replace('— — ', '— ')
-    text = text.strip(' -—').strip()
-    
-    # Clean up duplicate spaces
-    text = ' '.join(text.split())
-    
-    # Final pass - if text ends with just "Missing", replace it
-    if text.endswith(' Missing'):
-        text = text[:-8].strip()
-    
-    # If text is just "Missing", return empty or appropriate default
-    if text.strip() in ['Missing', 'Missing Missing', '- Missing', 'Missing -']:
-        text = ''
+    # If only "Missing" remains, return empty
+    if text.strip().lower() == 'missing':
+        return ''
     
     return text
 
@@ -17157,10 +17126,20 @@ def _build_flat_report(a: dict) -> dict:
     if result_with_enhanced.get('case_strength_score'):
         result_with_enhanced['executive_summary_enhanced'] = generate_executive_summary(result_with_enhanced)
     
-    # CRITICAL: Apply universal formatter to ensure consistent, clean output
-    # This is THE SINGLE POINT where all data is formatted for ALL outputs
-    # (Print, PDF, Test, API - everything uses this same clean data)
-    final_output = format_case_output(result_with_enhanced)
+    # ============================================================================
+    # FINAL CLEANUP - THIS MUST BE THE LAST STEP BEFORE RETURNING
+    # This ensures ALL "Missing" patterns are removed from nested structures
+    # ============================================================================
+    final_output = clean_output_data(result_with_enhanced)
+    
+    # Extra safety: clean executive summary text
+    if 'executive_summary_enhanced' in final_output and isinstance(final_output['executive_summary_enhanced'], str):
+        final_output['executive_summary_enhanced'] = sanitize_text(final_output['executive_summary_enhanced'])
+    
+    if 'executive_summary' in final_output and isinstance(final_output.get('executive_summary'), dict):
+        for key, value in final_output['executive_summary'].items():
+            if isinstance(value, str):
+                final_output['executive_summary'][key] = sanitize_text(value)
     
     return final_output
 
