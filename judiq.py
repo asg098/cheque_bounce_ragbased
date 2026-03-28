@@ -132,6 +132,89 @@ def safe_get(data: Dict, *keys, default=None):
     return result if result is not None else default
 
 
+def format_output_value(value, field_name=""):
+    """
+    Universal formatter for ALL output values - ensures consistent, clean presentation
+    across Print, PDF, Test, and all other outputs.
+    
+    This is the SINGLE SOURCE OF TRUTH for how data should be displayed.
+    """
+    # Handle None/empty/falsy values
+    if value is None or value == "" or value == [] or value == {}:
+        return ""
+    
+    # Handle boolean values
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    
+    # Handle numeric values
+    if isinstance(value, (int, float)):
+        if isinstance(value, float) and value != value:  # NaN check
+            return ""
+        return value
+    
+    # Handle string values - this is where we clean everything
+    if isinstance(value, str):
+        text = value.strip()
+        
+        # Remove all "Missing" patterns completely
+        # This is THE fix - we don't show "Missing" at all, just empty string
+        if text.lower() == 'missing':
+            return ""
+        
+        # If text contains "Missing", clean it completely
+        if 'missing' in text.lower():
+            # Remove all Missing patterns
+            import re
+            text = re.sub(r'(?i)\s*-?\s*missing\s*-?\s*', '', text)
+            text = re.sub(r'(?i)missing\s+missing', '', text)
+            text = re.sub(r'(?i)missing', '', text)
+            text = text.strip(' -—')
+            
+            # If nothing left after removing "Missing", return empty
+            if not text or text in ['-', '—', '--']:
+                return ""
+        
+        # Clean up duplicate dashes
+        text = re.sub(r'\s*-\s*-\s*', ' ', text)
+        text = re.sub(r'^\s*[-—]+\s*|\s*[-—]+\s*$', '', text)
+        text = ' '.join(text.split())  # Normalize spaces
+        
+        return text if text else ""
+    
+    # Handle lists - format each item
+    if isinstance(value, list):
+        return [format_output_value(item, field_name) for item in value if format_output_value(item, field_name)]
+    
+    # Handle dicts - format each value
+    if isinstance(value, dict):
+        return {k: format_output_value(v, k) for k, v in value.items()}
+    
+    return value
+
+
+def format_case_output(data):
+    """
+    Universal case output formatter - THE SINGLE FORMATTER used by ALL outputs.
+    
+    This ensures Print, PDF, Test, and all other outputs show the SAME clean data.
+    """
+    if not isinstance(data, dict):
+        return data
+    
+    # Recursively format all values in the data structure
+    formatted = {}
+    
+    for key, value in data.items():
+        formatted_value = format_output_value(value, key)
+        
+        # Only include non-empty values
+        if formatted_value != "" and formatted_value != [] and formatted_value != {}:
+            formatted[key] = formatted_value
+    
+    return formatted
+
+
 def sanitize_text(text: str) -> str:
     """
     Global text sanitizer to eliminate all 'Missing Missing' patterns and clean up text.
@@ -17037,7 +17120,12 @@ def _build_flat_report(a: dict) -> dict:
     if result_with_enhanced.get('case_strength_score'):
         result_with_enhanced['executive_summary_enhanced'] = generate_executive_summary(result_with_enhanced)
     
-    return result_with_enhanced
+    # CRITICAL: Apply universal formatter to ensure consistent, clean output
+    # This is THE SINGLE POINT where all data is formatted for ALL outputs
+    # (Print, PDF, Test, API - everything uses this same clean data)
+    final_output = format_case_output(result_with_enhanced)
+    
+    return final_output
 
 @app.post("/generate-cross-examination")
 async def generate_cross_examination(request: CrossExaminationRequest):
