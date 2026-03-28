@@ -21,15 +21,20 @@ except ImportError:
 TORCH_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
-
 PHI2_AVAILABLE = False
 
-
-ENGINE_VERSION = "v11.0-ENHANCED"
-SCORING_MODEL_VERSION = "6.0"
+ENGINE_VERSION = "v2.1-PRODUCTION"
+ARCHITECTURE_VERSION = "Data-First-Single-Formatter"
+SCORING_MODEL_VERSION = "7.0"
 TIMELINE_MATH_VERSION = "CALENDAR_MONTHS"
 
-# Enhanced Feature Flags
+class Config:
+    WEIGHTS = {'timeline': 0.25, 'ingredients': 0.30, 'documents': 0.20, 'defence': 0.15, 'procedural': 0.10}
+    FATAL_OVERRIDES = {'limitation_expired': 0, 'notice_not_sent': 15, 'major_timeline_defect': 25, 'critical_ingredient_missing': 30}
+    TIMELINE = {'cheque_validity_months': 3, 'notice_period_days': 15, 'filing_limitation_months': 1}
+    DB_PATH = Path("judiq_cases_v2.1.db")
+    PDF_OUTPUT_DIR = Path("/mnt/user-data/outputs")
+
 ENHANCED_FEATURES_ENABLED = True
 CASE_STRENGTH_SCORING = True
 DOCUMENT_INTELLIGENCE = True
@@ -46,7 +51,8 @@ FEEDBACK_LEARNING_SYSTEM = True
 
 
 def indian_number_format(amount: float) -> str:
-    """Format number in Indian style: 5,00,000 instead of 500,000."""
+    if amount is None or (isinstance(amount, float) and amount != amount):
+        return "0"
     s = str(int(amount))
     if len(s) <= 3:
         result = s
@@ -58,7 +64,6 @@ def indian_number_format(amount: float) -> str:
             s = s[:-2]
         if s:
             result = s + ',' + result
-
     paise = round((amount % 1) * 100)
     if paise:
         return f"{result}.{paise:02d}"
@@ -66,7 +71,6 @@ def indian_number_format(amount: float) -> str:
 
 
 def add_calendar_months(start_date, months: int):
-
     if isinstance(start_date, str):
         try:
             start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
@@ -76,13 +80,12 @@ def add_calendar_months(start_date, months: int):
 
 
 def calculate_cheque_expiry(cheque_date):
-
     if isinstance(cheque_date, str):
         try:
             cheque_date = datetime.strptime(cheque_date, '%Y-%m-%d').date()
         except (ValueError, TypeError):
             raise ValueError(f"Invalid cheque_date '{cheque_date}' — expected YYYY-MM-DD")
-    expiry = add_calendar_months(cheque_date, 3)
+    expiry = add_calendar_months(cheque_date, Config.TIMELINE['cheque_validity_months'])
     days_to_expiry = (expiry - cheque_date).days
     return expiry, days_to_expiry
 
@@ -133,53 +136,38 @@ def safe_get(data: Dict, *keys, default=None):
 
 
 def display_value(value, value_type='text'):
-    """
-    STRONGEST VERSION - Completely removes ALL 'Missing' text variations.
-    This is the FINAL version that handles all edge cases.
-    """
     if value is None or value == "" or value == [] or value == {}:
         return ""
-    
     if isinstance(value, bool):
         return "Yes" if value else "No"
-    
     if isinstance(value, (int, float)):
-        if isinstance(value, float) and value != value:  # NaN check
+        if isinstance(value, float) and value != value:
             return ""
         if value_type == 'amount':
             return f"₹{indian_number_format(value)}"
         if value_type == 'score':
             return f"{value:.1f}/100"
         return str(value)
-    
     if isinstance(value, str):
         text = value.strip()
-        # Remove ALL variations of Missing
         text = text.replace('Missing Missing Missing', '')
         text = text.replace('Missing Missing', '')
         text = text.replace('Missing - Missing', '')
         text = text.replace('- Missing', '')
         text = text.replace('Missing -', '')
         text = text.replace('Missing', '').strip()
-        if not text or text in ['-', '--', '—']:
+        if not text or text in ['-', '--', '—', 'N/A', 'n/a']:
             return ""
         return text
-    
     if isinstance(value, list):
         cleaned = [display_value(item, value_type) for item in value]
         return [item for item in cleaned if item]
-    
     if isinstance(value, dict):
         return {k: display_value(v, value_type) for k, v in value.items() if display_value(v, value_type)}
-    
     return str(value)
 
 
 def clean_output_data(data):
-    """
-    FINAL CLEANUP - Call this at the very end before returning data.
-    Recursively cleans all nested structures.
-    """
     if isinstance(data, dict):
         cleaned = {}
         for k, v in data.items():
@@ -195,39 +183,22 @@ def clean_output_data(data):
 
 
 def clean_list(items):
-    """
-    Clean a list by removing empty, None, and duplicate items.
-    This prevents "Missing" duplication in lists.
-    """
     if not items:
         return []
-    
     cleaned = []
     seen = set()
-    
     for item in items:
-        if not item:  # Skip None, "", [], {}
+        if not item or item in [None, "", [], {}]:
             continue
-        
-        # Convert to string for processing
         item_str = str(item).strip()
-        
-        # Skip if empty after stripping
         if not item_str:
             continue
-        
-        # Skip if we've seen this exact item (removes duplicates)
         if item_str.lower() in seen:
             continue
-        
-        # Skip if item is just "Missing" or contains only "Missing"
-        if item_str.lower() == 'missing':
+        if item_str.lower() in ['missing', 'n/a', '-', '--']:
             continue
-        
-        # Add to result
         cleaned.append(item)
         seen.add(item_str.lower())
-    
     return cleaned
 
 
