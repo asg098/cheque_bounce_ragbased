@@ -132,85 +132,123 @@ def safe_get(data: Dict, *keys, default=None):
     return result if result is not None else default
 
 
-def format_output_value(value, field_name=""):
+def display_value(value, label=None, value_type='text'):
     """
-    Universal formatter for ALL output values - ensures consistent, clean presentation
-    across Print, PDF, Test, and all other outputs.
+    SINGLE POINT OF TRUTH for displaying values.
     
-    This is the SINGLE SOURCE OF TRUTH for how data should be displayed.
+    This is where "Missing" appears - ONLY HERE, NEVER in data layer.
+    
+    Args:
+        value: The actual data value (None, bool, str, number, etc.)
+        label: Optional label for the field
+        value_type: Type of value for special formatting ('text', 'bool', 'score', 'amount')
+    
+    Returns:
+        Clean display string
     """
-    # Handle None/empty/falsy values
+    # Handle None/empty - this is where we say "Missing" or return empty
     if value is None or value == "" or value == [] or value == {}:
-        return ""
+        return ""  # Return empty, not "Missing"
     
-    # Handle boolean values
+    # Handle booleans
     if isinstance(value, bool):
         return "Yes" if value else "No"
     
-    # Handle numeric values
+    # Handle numbers
     if isinstance(value, (int, float)):
-        if isinstance(value, float) and value != value:  # NaN check
+        if isinstance(value, float) and value != value:  # NaN
             return ""
-        return value
+        if value_type == 'score':
+            return f"{value:.1f}/100"
+        if value_type == 'amount':
+            return f"₹{indian_number_format(value)}"
+        return str(value)
     
-    # Handle string values - this is where we clean everything
+    # Handle strings - just return as-is (should already be clean from data layer)
     if isinstance(value, str):
-        text = value.strip()
-        
-        # Remove all "Missing" patterns completely
-        # This is THE fix - we don't show "Missing" at all, just empty string
-        if text.lower() == 'missing':
+        # Safety: if somehow "Missing" got into data, remove it
+        if value.lower() == 'missing':
             return ""
-        
-        # If text contains "Missing", clean it completely
-        if 'missing' in text.lower():
-            # Remove all Missing patterns
-            import re
-            text = re.sub(r'(?i)\s*-?\s*missing\s*-?\s*', '', text)
-            text = re.sub(r'(?i)missing\s+missing', '', text)
-            text = re.sub(r'(?i)missing', '', text)
-            text = text.strip(' -—')
-            
-            # If nothing left after removing "Missing", return empty
-            if not text or text in ['-', '—', '--']:
-                return ""
-        
-        # Clean up duplicate dashes
-        text = re.sub(r'\s*-\s*-\s*', ' ', text)
-        text = re.sub(r'^\s*[-—]+\s*|\s*[-—]+\s*$', '', text)
-        text = ' '.join(text.split())  # Normalize spaces
-        
-        return text if text else ""
+        return value.strip()
     
-    # Handle lists - format each item
+    # Handle lists
     if isinstance(value, list):
-        return [format_output_value(item, field_name) for item in value if format_output_value(item, field_name)]
+        return [display_value(item, None, value_type) for item in value if display_value(item, None, value_type)]
     
-    # Handle dicts - format each value
+    # Handle dicts
     if isinstance(value, dict):
-        return {k: format_output_value(v, k) for k, v in value.items()}
+        return {k: display_value(v, None, value_type) for k, v in value.items()}
     
-    return value
+    return str(value)
+
+
+def clean_list(items):
+    """
+    Clean a list by removing empty, None, and duplicate items.
+    This prevents "Missing" duplication in lists.
+    """
+    if not items:
+        return []
+    
+    cleaned = []
+    seen = set()
+    
+    for item in items:
+        if not item:  # Skip None, "", [], {}
+            continue
+        
+        # Convert to string for processing
+        item_str = str(item).strip()
+        
+        # Skip if empty after stripping
+        if not item_str:
+            continue
+        
+        # Skip if we've seen this exact item (removes duplicates)
+        if item_str.lower() in seen:
+            continue
+        
+        # Skip if item is just "Missing" or contains only "Missing"
+        if item_str.lower() == 'missing':
+            continue
+        
+        # Add to result
+        cleaned.append(item)
+        seen.add(item_str.lower())
+    
+    return cleaned
+
+
+def format_output_value(value, field_name=""):
+    """
+    Universal formatter for ALL output values.
+    Uses display_value() for clean presentation.
+    """
+    return display_value(value)
 
 
 def format_case_output(data):
     """
-    Universal case output formatter - THE SINGLE FORMATTER used by ALL outputs.
+    Universal case output formatter.
     
-    This ensures Print, PDF, Test, and all other outputs show the SAME clean data.
+    Ensures all outputs (Print, PDF, Test, API) use the same clean data.
     """
     if not isinstance(data, dict):
         return data
     
-    # Recursively format all values in the data structure
     formatted = {}
     
     for key, value in data.items():
-        formatted_value = format_output_value(value, key)
-        
-        # Only include non-empty values
-        if formatted_value != "" and formatted_value != [] and formatted_value != {}:
-            formatted[key] = formatted_value
+        # Handle lists specially - use clean_list
+        if isinstance(value, list):
+            cleaned_list = clean_list(value)
+            if cleaned_list:  # Only include non-empty lists
+                formatted[key] = [display_value(item) for item in cleaned_list]
+        else:
+            formatted_value = display_value(value)
+            # Only include non-empty values
+            if formatted_value not in ("", [], {}, None):
+                formatted[key] = formatted_value
     
     return formatted
 
