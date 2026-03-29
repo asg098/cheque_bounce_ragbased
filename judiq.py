@@ -6,6 +6,7 @@ import sqlite3
 import time
 import os
 import threading
+import re
 from datetime import datetime, timedelta, date
 from dateutil.relativedelta import relativedelta
 from typing import List, Dict, Optional, Tuple, Any
@@ -90,6 +91,16 @@ def indian_number_format(amount: float) -> str:
     if paise:
         return f"{result}.{paise:02d}"
     return result
+
+
+def aggressive_clean(text):
+    if not isinstance(text, str):
+        return text
+    text = text.replace('Menu', '').replace('? Missing', 'Missing')
+    text = re.sub(r'\?+', '', text)
+    text = re.sub(r'-+', '-', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
 
 
 def add_calendar_months(start_date, months: int):
@@ -275,12 +286,8 @@ def sanitize_text(text: str) -> str:
 def final_clean_text(text):
     if not isinstance(text, str):
         return text
-    return (
-        text.replace("? Missing", "Missing")
-            .replace("?", "")
-            .replace("  ", " ")
-            .strip()
-    )
+    text = aggressive_clean(text)
+    return text.strip()
 
 
 def generate_question_from_issue(issue_key):
@@ -6646,6 +6653,8 @@ def calculate_overall_risk_score(
             'applied': True,
             'original_weighted_score': round(total_weighted, 1),
             'original_score': round(total_weighted, 1),
+            'capped_at': _capped_at
+        }
     
     if timeline_data.get('fatal_defect') or timeline_data.get('limitation_expired'):
         risk_model['final_score'] = min(risk_model['final_score'], 25)
@@ -6655,25 +6664,20 @@ def calculate_overall_risk_score(
             risk_model['fatal_defect_override'] = {
                 'applied': True,
                 'reason': 'Timeline fatal defect detected',
-                'capped_at': 25
+                'capped_at': 25,
+                'original_score_display': f"{round(total_weighted, 1):.1f}/100",
+                'severity': 'FATAL',
+                'logic': 'Fatal defects auto-cap score — case will collapse regardless of other strengths',
+                'warning': 'Despite strong scores in other areas, fatal defects make case unviable'
             }
-            'original_score_display': f"{round(total_weighted, 1):.1f}/100",
-            'overridden_score': _capped_at,
-            'capped_at': _capped_at,
-            'capped_at_display': f"{_capped_at}/100",
-            'reason': ' | '.join(override_reason),
-            'logic': 'Fatal defects auto-cap score — case will collapse regardless of other strengths',
-            'severity': 'FATAL' if _capped_at <= 25 else 'CRITICAL',
-            'warning': 'Despite strong scores in other areas, fatal defects make case unviable'
-        }
 
-        if risk_model['final_score'] <= 20:
-            risk_model['compliance_level'] = ComplianceLevel.CRITICAL
-            risk_model['confidence_level'] = 'CERTAIN FAILURE - Fatal defects present'
-            risk_model['score_interpretation'] = 'VERY WEAK (0-30): Case will almost certainly fail without addressing fatal defects'
-        elif risk_model['final_score'] <= 40:
-            risk_model['compliance_level'] = ComplianceLevel.CRITICAL
-            risk_model['confidence_level'] = 'Very high risk - Critical defects likely fatal'
+    if risk_model['final_score'] <= 20:
+        risk_model['compliance_level'] = ComplianceLevel.CRITICAL
+        risk_model['confidence_level'] = 'CERTAIN FAILURE - Fatal defects present'
+        risk_model['score_interpretation'] = 'VERY WEAK (0-30): Case will almost certainly fail without addressing fatal defects'
+    elif risk_model['final_score'] <= 40:
+        risk_model['compliance_level'] = ComplianceLevel.CRITICAL
+        risk_model['confidence_level'] = 'Very high risk - Critical defects likely fatal'
     else:
 
         if (risk_model.get('final_score') or 0) >= 90:
