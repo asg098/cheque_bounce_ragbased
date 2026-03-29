@@ -22034,21 +22034,17 @@ def create_app():
                     'success': False,
                     'error': 'No case IDs provided'
                 }), 400
-            
             comparison = CASE_DB.compare_cases(case_ids)
-            
             return jsonify({
                 'success': True,
                 'comparison': comparison
             }), 200
-            
         except Exception as e:
             logger.error(f"Case comparison error: {e}")
             return jsonify({
                 'success': False,
                 'error': str(e)
             }), 500
-    
     @app.route('/api/user/dashboard/<email>', methods=['GET', 'OPTIONS'])
     def get_user_dashboard(email):
         """Get user dashboard with case statistics"""
@@ -22142,29 +22138,23 @@ def create_app():
                     'success': False,
                     'error': 'PDF generation not available'
                 }), 503
-            
             pdf_path = generate_pdf_report(
                 case['case_data'],
                 case['analysis'],
                 f"/mnt/user-data/outputs/case_report_{case_id}.pdf"
-            )
-            
+            )  
             return jsonify({
                 'success': True,
                 'pdf_path': pdf_path,
                 'message': 'PDF report generated successfully'
-            }), 200
-            
+            }), 200   
         except Exception as e:
             logger.error(f"PDF generation error: {e}")
             return jsonify({
                 'success': False,
                 'error': str(e)
             }), 500
-    
     return app
-
-
 if __name__ == '__main__':
     if FLASK_AVAILABLE:
         app = create_app()
