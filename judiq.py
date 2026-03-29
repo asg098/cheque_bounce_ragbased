@@ -168,15 +168,12 @@ def safe_get(data: Dict, *keys, default=None):
     return result if result is not None else default
 
 
-# ====================== NUCLEAR CLEANING BLOCK (V1 FINAL) ======================
 def display_value(value, value_type='text'):
-    """NUCLEAR VERSION - kills every pattern from TEST19.pdf"""
+    """NUCLEAR VERSION - kills ? Missing and all variations"""
     if value is None or value == "" or value == [] or value == {}:
         return ""
-
     if isinstance(value, bool):
         return "Yes" if value else "No"
-
     if isinstance(value, (int, float)):
         if isinstance(value, float) and value != value:
             return ""
@@ -185,75 +182,43 @@ def display_value(value, value_type='text'):
         if value_type == 'score':
             return f"{value:.1f}/100"
         return str(value)
-
     if isinstance(value, str):
         text = value.strip()
-        
-        # Nuclear patterns (covers ? Missing, ? , etc.)
-        patterns = [
-            r"\?\s*Missing",          # ? Missing
-            r"\? Missing", 
-            r"\?\s*",                 # lone ?
-            "Missing Missing Missing",
-            "Missing Missing",
-            "Missing - Missing",
-            "- Missing",
-            "Missing -",
-            "Missing"
-        ]
-        
-        for p in patterns:
-            text = re.sub(p, "", text) if r"\\" in p else text.replace(p, "")
-        
+        # Nuclear clean - order matters
+        text = text.replace('? Missing', '')
+        text = text.replace('?', '')
+        text = re.sub(r'\?\s*Missing', '', text)
+        text = re.sub(r'\?\s*', '', text)
+        text = text.replace('Missing Missing Missing', '')
+        text = text.replace('Missing Missing', '')
+        text = text.replace('Missing - Missing', '')
+        text = text.replace('- Missing', '')
+        text = text.replace('Missing -', '')
         text = re.sub(r'\s+', ' ', text).strip()
         if not text or text.lower() in ['missing', 'none', 'n/a', '-', '—']:
             return ""
         return text
-
     if isinstance(value, list):
         cleaned = [display_value(item, value_type) for item in value]
         return [item for item in cleaned if item]
-
     if isinstance(value, dict):
         return {k: display_value(v, value_type) for k, v in value.items() if display_value(v, value_type)}
-
     return str(value)
 
 
 def clean_output_data(data):
-    """FINAL RECURSIVE CLEANER - MUST BE CALLED AT THE VERY END"""
     if isinstance(data, dict):
-        return {k: clean_output_data(v) for k, v in data.items() if clean_output_data(v) not in [None, "", [], {}]}
+        cleaned = {}
+        for k, v in data.items():
+            cleaned_value = clean_output_data(v)
+            if cleaned_value not in [None, "", [], {}]:
+                cleaned[k] = cleaned_value
+        return cleaned
     elif isinstance(data, list):
-        return [clean_output_data(item) for item in data if clean_output_data(item) not in [None, "", [], {}]]
+        cleaned = [clean_output_data(item) for item in data]
+        return [item for item in cleaned if item not in [None, "", [], {}]]
     else:
         return display_value(data)
-
-
-def sanitize_text(text: str) -> str:
-    """Extra safety layer"""
-    if not isinstance(text, str):
-        return text
-    return display_value(text)  # reuse nuclear cleaner
-
-
-def final_clean(report):
-    """Ultimate wrapper - call this on the complete analysis result"""
-    if not isinstance(report, dict):
-        return report
-    
-    def deep_clean(v):
-        if isinstance(v, str):
-            return sanitize_text(v)
-        elif isinstance(v, list):
-            return [deep_clean(x) for x in v if deep_clean(x)]
-        elif isinstance(v, dict):
-            return {k: deep_clean(val) for k, val in v.items() if deep_clean(val)}
-        return v
-    
-    cleaned = deep_clean(report)
-    return cleaned
-# ===============================================================================
 
 
 def clean_list(items):
@@ -311,17 +276,36 @@ def format_case_output(data):
 
 
 def sanitize_text(text: str) -> str:
+    """Extra safety layer - reuses nuclear cleaner"""
     if not isinstance(text, str):
         return text
-    text = text.replace('Missing Missing Missing', '')
-    text = text.replace('Missing Missing', '')
-    text = text.replace('Missing - Missing', '')
-    text = text.replace('- Missing', '')
-    text = text.replace('Missing -', '')
-    text = ' '.join(text.split())
-    if text.strip().lower() == 'missing':
-        return ''
-    return text
+    return display_value(text)
+
+
+def format_legal_text(text: str, section: str = "") -> str:
+    """Convert raw system text into lawyer-grade language"""
+    if not isinstance(text, str):
+        return text
+    
+    replacements = {
+        "Missing written agreement": "Absence of written agreement",
+        "Missing documentary proof": "Lack of documentary evidence of debt",
+        "? Missing": "",
+        "primary defence weakness": "significantly weakens enforceability of debt",
+        "Is it correct that there is ? Missing": "Is it correct that no",
+        "Is it correct that there is Missing": "Is it correct that there is no"
+    }
+    
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    
+    # Make questions cleaner
+    if "Is it correct that" in text and "Missing" in text:
+        text = text.replace("Missing", "no") 
+        if not text.endswith("?"):
+            text += "?"
+    
+    return text.strip()
 
 
 def final_clean_text(text):
@@ -380,30 +364,26 @@ def remove_formatting_artifacts(text):
 
 
 def final_clean(report):
+    """Ultimate wrapper - applies nuclear + legal formatting"""
     if not isinstance(report, dict):
         return report
     
-    def clean_value(v):
+    def deep_clean(v):
         if isinstance(v, str):
             v = remove_formatting_artifacts(v)
             v = sanitize_text(v)
             v = final_clean_text(v)
+            v = format_legal_text(v)
             return v.strip() if v else ""
         elif isinstance(v, list):
-            cleaned = [clean_value(x) for x in v]
+            cleaned = [deep_clean(x) for x in v]
             cleaned = [x for x in cleaned if x]
             return deduplicate_list(cleaned)
         elif isinstance(v, dict):
-            return final_clean(v)
+            return {k: deep_clean(val) for k, val in v.items() if deep_clean(val)}
         return v
     
-    cleaned_report = {}
-    for k, v in report.items():
-        cleaned_v = clean_value(v)
-        if cleaned_v not in [None, "", [], {}]:
-            cleaned_report[k] = cleaned_v
-    
-    return cleaned_report
+    return deep_clean(report)
 
 
 def format_timeline_transparency(timeline_data: Dict) -> Dict:
@@ -21609,23 +21589,22 @@ def run_enhanced_analysis(case_data: Dict) -> Dict:
     
     logger.info("Enhanced analysis completed successfully")
     
-    # ====================== FINAL CLEANUP - NUCLEAR VERSION ======================
-    analysis_result = final_clean(enhanced_analysis)
+    # Nuclear final clean
+    enhanced_analysis = final_clean(enhanced_analysis)
     
-    # Extra safety for executive_summary and defence sections
-    if isinstance(analysis_result.get("executive_summary"), dict):
-        for key in list(analysis_result["executive_summary"].keys()):
-            val = analysis_result["executive_summary"][key]
+    # Extra safety for critical sections
+    if isinstance(enhanced_analysis.get("executive_summary"), dict):
+        for key in list(enhanced_analysis["executive_summary"].keys()):
+            val = enhanced_analysis["executive_summary"][key]
             if isinstance(val, str):
-                analysis_result["executive_summary"][key] = sanitize_text(val)
+                enhanced_analysis["executive_summary"][key] = format_legal_text(sanitize_text(val))
     
-    if isinstance(analysis_result.get("defence_analysis"), dict):
-        analysis_result["defence_analysis"] = final_clean(analysis_result["defence_analysis"])
+    if isinstance(enhanced_analysis.get("defence_analysis"), dict):
+        enhanced_analysis["defence_analysis"] = final_clean(enhanced_analysis["defence_analysis"])
     
     logger.info("✅ Nuclear final clean applied")
-    # ==========================================================================
     
-    return analysis_result
+    return enhanced_analysis
 
 
 def generate_executive_summary(analysis: Dict) -> str:
