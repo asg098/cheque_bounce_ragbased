@@ -22226,38 +22226,4 @@ if __name__ == '__main__':
 Press CTRL+C to stop
 """)
         app.run(host='0.0.0.0', port=5000, debug=True)
-    else:
-        print("""
-╔════════════════════════════════════════════════════════════════╗
-║                    JUDIQ AI - ENHANCED EDITION                 ║
-║                     Command Line Interface                     ║
-╚════════════════════════════════════════════════════════════════╝
-
-ERROR: Flask not installed. Install with:
-  pip install flask flask-cors
-
-OPTIONAL DEPENDENCIES:
-  pip install firebase-admin    # For cloud storage
-  pip install reportlab          # For PDF generation
-  pip install pandas             # For data analysis
-
-CURRENT STATUS:
-  ✅ Core Analysis Engine: READY
-  ⚠️  API Server: Flask not installed
-  ⚠️  PDF Reports: {('READY' if REPORTLAB_AVAILABLE else 'ReportLab not installed')}
-  ⚠️  Cloud Storage: {('READY' if FIREBASE_AVAILABLE else 'Firebase not installed')}
-
-To use the enhanced analysis engine programmatically:
-  
-  from judiq import run_enhanced_analysis
-  
-  case_data = {{
-      'cheque_amount': 500000,
-      'cheque_date': '2024-01-15',
-      'dishonour_date': '2024-02-01',
-      'notice_date': '2024-02-10'
-  }}
-  
-  result = run_enhanced_analysis(case_data)
-  print(result)
-""")
+    
