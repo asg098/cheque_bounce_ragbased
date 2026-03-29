@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import hashlib
 import json
 import logging
@@ -22034,17 +22035,21 @@ def create_app():
                     'success': False,
                     'error': 'No case IDs provided'
                 }), 400
+            
             comparison = CASE_DB.compare_cases(case_ids)
+            
             return jsonify({
                 'success': True,
                 'comparison': comparison
             }), 200
+            
         except Exception as e:
             logger.error(f"Case comparison error: {e}")
             return jsonify({
                 'success': False,
                 'error': str(e)
             }), 500
+    
     @app.route('/api/user/dashboard/<email>', methods=['GET', 'OPTIONS'])
     def get_user_dashboard(email):
         """Get user dashboard with case statistics"""
@@ -22138,25 +22143,122 @@ def create_app():
                     'success': False,
                     'error': 'PDF generation not available'
                 }), 503
+            
             pdf_path = generate_pdf_report(
                 case['case_data'],
                 case['analysis'],
                 f"/mnt/user-data/outputs/case_report_{case_id}.pdf"
-            )  
+            )
+            
             return jsonify({
                 'success': True,
                 'pdf_path': pdf_path,
                 'message': 'PDF report generated successfully'
-            }), 200   
+            }), 200
+            
         except Exception as e:
             logger.error(f"PDF generation error: {e}")
             return jsonify({
                 'success': False,
                 'error': str(e)
             }), 500
+    
     return app
+
+
 if __name__ == '__main__':
     if FLASK_AVAILABLE:
         app = create_app()
-    app.run(host='0.0.0.0', port=5000, debug=True)
-    
+        print(f"""
+╔════════════════════════════════════════════════════════════════╗
+║                     JUDIQ AI API SERVER                        ║
+║            Legal Analysis Engine {ENGINE_VERSION} ENHANCED            ║
+╚════════════════════════════════════════════════════════════════╝
+
+🚀 Server starting on http://localhost:5000
+
+📊 ENHANCED FEATURES:
+  ✅ Case Strength Scoring (0-100)
+  ✅ Document Intelligence & Contradiction Detection
+  ✅ Director & Company Liability Analysis
+  ✅ Payment Dispute Systems (Invoice/Lending/Business)
+  ✅ Defence Generator & Failure Analysis
+  ✅ Strategy Engine with Settlement Recommendations
+  ✅ Outcome Prediction & Success Probability
+  ✅ Time & Cost Analysis
+  ✅ Recovery Intelligence
+  ✅ Multi-Case Comparison Dashboard
+  ✅ PDF Report Generation
+  ✅ Feedback & Learning System
+
+📡 API ENDPOINTS:
+
+  CORE ANALYSIS:
+  POST   /api/analyze              - Standard case analysis
+  POST   /api/analyze/enhanced     - Enhanced analysis (all features)
+
+  USER MANAGEMENT:
+  GET    /api/user/case-history/<email> - Get case history
+  GET    /api/user/usage/<email>   - Get usage quota
+  GET    /api/user/dashboard/<email> - User dashboard & statistics
+
+  CASE COMPARISON:
+  POST   /api/case/compare         - Compare multiple cases
+  GET    /api/case/pdf-report/<case_id> - Generate PDF report
+
+  FEEDBACK SYSTEM:
+  POST   /api/feedback             - Submit case feedback
+  GET    /api/feedback/patterns    - Get feedback patterns
+
+  SYSTEM:
+  GET    /api/health               - Health check & feature status
+
+📖 USAGE EXAMPLE:
+  curl -X POST http://localhost:5000/api/analyze/enhanced \\
+    -H "Content-Type: application/json" \\
+    -d '{
+      "user_email": "lawyer@example.com",
+      "cheque_amount": 500000,
+      "cheque_date": "2024-01-15",
+      "dishonour_date": "2024-02-01",
+      "notice_date": "2024-02-10"
+    }'
+
+Press CTRL+C to stop
+""")
+        app.run(host='0.0.0.0', port=5000, debug=True)
+    else:
+        print("""
+╔════════════════════════════════════════════════════════════════╗
+║                    JUDIQ AI - ENHANCED EDITION                 ║
+║                     Command Line Interface                     ║
+╚════════════════════════════════════════════════════════════════╝
+
+ERROR: Flask not installed. Install with:
+  pip install flask flask-cors
+
+OPTIONAL DEPENDENCIES:
+  pip install firebase-admin    # For cloud storage
+  pip install reportlab          # For PDF generation
+  pip install pandas             # For data analysis
+
+CURRENT STATUS:
+  ✅ Core Analysis Engine: READY
+  ⚠️  API Server: Flask not installed
+  ⚠️  PDF Reports: {('READY' if REPORTLAB_AVAILABLE else 'ReportLab not installed')}
+  ⚠️  Cloud Storage: {('READY' if FIREBASE_AVAILABLE else 'Firebase not installed')}
+
+To use the enhanced analysis engine programmatically:
+  
+  from judiq import run_enhanced_analysis
+  
+  case_data = {{
+      'cheque_amount': 500000,
+      'cheque_date': '2024-01-15',
+      'dishonour_date': '2024-02-01',
+      'notice_date': '2024-02-10'
+  }}
+  
+  result = run_enhanced_analysis(case_data)
+  print(result)
+""")
