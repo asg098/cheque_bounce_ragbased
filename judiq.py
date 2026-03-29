@@ -168,11 +168,15 @@ def safe_get(data: Dict, *keys, default=None):
     return result if result is not None else default
 
 
+# ====================== NUCLEAR CLEANING BLOCK (V1 FINAL) ======================
 def display_value(value, value_type='text'):
+    """NUCLEAR VERSION - kills every pattern from TEST19.pdf"""
     if value is None or value == "" or value == [] or value == {}:
         return ""
+
     if isinstance(value, bool):
         return "Yes" if value else "No"
+
     if isinstance(value, (int, float)):
         if isinstance(value, float) and value != value:
             return ""
@@ -181,38 +185,75 @@ def display_value(value, value_type='text'):
         if value_type == 'score':
             return f"{value:.1f}/100"
         return str(value)
+
     if isinstance(value, str):
         text = value.strip()
-        text = text.replace('Missing Missing Missing', '')
-        text = text.replace('Missing Missing', '')
-        text = text.replace('Missing - Missing', '')
-        text = text.replace('- Missing', '')
-        text = text.replace('Missing -', '')
-        text = text.replace('Missing', '').strip()
-        if not text or text in ['-', '--', '—', 'N/A', 'n/a']:
+        
+        # Nuclear patterns (covers ? Missing, ? , etc.)
+        patterns = [
+            r"\?\s*Missing",          # ? Missing
+            r"\? Missing", 
+            r"\?\s*",                 # lone ?
+            "Missing Missing Missing",
+            "Missing Missing",
+            "Missing - Missing",
+            "- Missing",
+            "Missing -",
+            "Missing"
+        ]
+        
+        for p in patterns:
+            text = re.sub(p, "", text) if r"\\" in p else text.replace(p, "")
+        
+        text = re.sub(r'\s+', ' ', text).strip()
+        if not text or text.lower() in ['missing', 'none', 'n/a', '-', '—']:
             return ""
         return text
+
     if isinstance(value, list):
         cleaned = [display_value(item, value_type) for item in value]
         return [item for item in cleaned if item]
+
     if isinstance(value, dict):
         return {k: display_value(v, value_type) for k, v in value.items() if display_value(v, value_type)}
+
     return str(value)
 
 
 def clean_output_data(data):
+    """FINAL RECURSIVE CLEANER - MUST BE CALLED AT THE VERY END"""
     if isinstance(data, dict):
-        cleaned = {}
-        for k, v in data.items():
-            cleaned_value = clean_output_data(v)
-            if cleaned_value not in [None, "", [], {}]:
-                cleaned[k] = cleaned_value
-        return cleaned
+        return {k: clean_output_data(v) for k, v in data.items() if clean_output_data(v) not in [None, "", [], {}]}
     elif isinstance(data, list):
-        cleaned = [clean_output_data(item) for item in data]
-        return [item for item in cleaned if item not in [None, "", [], {}]]
+        return [clean_output_data(item) for item in data if clean_output_data(item) not in [None, "", [], {}]]
     else:
         return display_value(data)
+
+
+def sanitize_text(text: str) -> str:
+    """Extra safety layer"""
+    if not isinstance(text, str):
+        return text
+    return display_value(text)  # reuse nuclear cleaner
+
+
+def final_clean(report):
+    """Ultimate wrapper - call this on the complete analysis result"""
+    if not isinstance(report, dict):
+        return report
+    
+    def deep_clean(v):
+        if isinstance(v, str):
+            return sanitize_text(v)
+        elif isinstance(v, list):
+            return [deep_clean(x) for x in v if deep_clean(x)]
+        elif isinstance(v, dict):
+            return {k: deep_clean(val) for k, val in v.items() if deep_clean(val)}
+        return v
+    
+    cleaned = deep_clean(report)
+    return cleaned
+# ===============================================================================
 
 
 def clean_list(items):
@@ -21568,7 +21609,23 @@ def run_enhanced_analysis(case_data: Dict) -> Dict:
     
     logger.info("Enhanced analysis completed successfully")
     
-    return final_clean(enhanced_analysis)
+    # ====================== FINAL CLEANUP - NUCLEAR VERSION ======================
+    analysis_result = final_clean(enhanced_analysis)
+    
+    # Extra safety for executive_summary and defence sections
+    if isinstance(analysis_result.get("executive_summary"), dict):
+        for key in list(analysis_result["executive_summary"].keys()):
+            val = analysis_result["executive_summary"][key]
+            if isinstance(val, str):
+                analysis_result["executive_summary"][key] = sanitize_text(val)
+    
+    if isinstance(analysis_result.get("defence_analysis"), dict):
+        analysis_result["defence_analysis"] = final_clean(analysis_result["defence_analysis"])
+    
+    logger.info("✅ Nuclear final clean applied")
+    # ==========================================================================
+    
+    return analysis_result
 
 
 def generate_executive_summary(analysis: Dict) -> str:
