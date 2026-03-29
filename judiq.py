@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import hashlib
 import json
 import logging
@@ -47,6 +48,28 @@ RECOVERY_INTELLIGENCE = True
 MULTI_CASE_COMPARISON = True
 PDF_REPORT_GENERATION = True
 FEEDBACK_LEARNING_SYSTEM = True
+
+ISSUE_BANK = {
+    "written_agreement": "No written agreement available",
+    "documentary_proof": "No documentary proof of debt",
+    "bank_memo": "Bank dishonour memo not available",
+    "witness_statement": "No witness statement filed",
+    "acknowledgment": "No acknowledgment of debt",
+    "demand_notice": "Demand notice not properly served",
+    "cheque_validity": "Cheque presented beyond validity period",
+    "notice_timeline": "Notice sent beyond 30-day deadline",
+    "filing_timeline": "Complaint filed beyond limitation period",
+    "company_directors": "Directors not properly impleaded",
+    "section_65b": "Section 65B certificate not filed for electronic evidence",
+    "dishonour_memo_missing": "Dishonour memo from bank missing",
+    "consideration_proof": "No proof of consideration for cheque",
+    "endorsement_issue": "Cheque endorsement questionable",
+    "signature_mismatch": "Signature verification concerns",
+    "stop_payment": "Accused claims stop payment instruction",
+    "account_closure": "Account closure evidence lacking",
+    "cash_transaction": "Cash transaction lacks verifiable documentary trail",
+    "notice_delivery": "Notice delivery proof inadequate"
+}
 
 
 def indian_number_format(amount: float) -> str:
@@ -249,6 +272,35 @@ def sanitize_text(text: str) -> str:
     return text
 
 
+def final_clean_text(text):
+    if not isinstance(text, str):
+        return text
+    return (
+        text.replace("? Missing", "Missing")
+            .replace("?", "")
+            .replace("  ", " ")
+            .strip()
+    )
+
+
+def generate_question_from_issue(issue_key):
+    issue_templates = {
+        "written_agreement": "Is it correct that there is no written agreement evidencing the alleged debt?",
+        "documentary_proof": "Is it correct that you do not have documentary proof of the debt?",
+        "bank_memo": "Is it correct that the bank dishonour memo is not available?",
+        "witness_statement": "Is it correct that no witness statement has been filed?",
+        "acknowledgment": "Is it correct that there is no acknowledgment of debt from the accused?",
+        "section_65b": "Is it correct that no Section 65B certificate has been filed for electronic evidence?",
+        "consideration_proof": "Is it correct that there is no proof of consideration for the cheque?",
+        "cash_transaction": "Is it correct that this was a cash transaction with no verifiable documentary trail?"
+    }
+    return issue_templates.get(issue_key, f"Is it correct that {ISSUE_BANK.get(issue_key, 'this issue exists')}?")
+
+
+def get_issue_text(issue_key):
+    return ISSUE_BANK.get(issue_key, issue_key)
+
+
 def deduplicate_list(items):
     if not items or not isinstance(items, list):
         return []
@@ -257,10 +309,10 @@ def deduplicate_list(items):
     for item in items:
         if not item:
             continue
-        item_key = str(item).strip().lower()
-        if item_key not in seen:
-            seen.add(item_key)
-            result.append(item)
+        clean = str(item).strip()
+        if clean and clean not in seen:
+            seen.add(clean)
+            result.append(clean)
     return result
 
 
@@ -287,6 +339,7 @@ def final_clean(report):
         if isinstance(v, str):
             v = remove_formatting_artifacts(v)
             v = sanitize_text(v)
+            v = final_clean_text(v)
             return v.strip() if v else ""
         elif isinstance(v, list):
             cleaned = [clean_value(x) for x in v]
@@ -6593,6 +6646,17 @@ def calculate_overall_risk_score(
             'applied': True,
             'original_weighted_score': round(total_weighted, 1),
             'original_score': round(total_weighted, 1),
+    
+    if timeline_data.get('fatal_defect') or timeline_data.get('limitation_expired'):
+        risk_model['final_score'] = min(risk_model['final_score'], 25)
+        risk_model['filing_status'] = 'DO NOT FILE'
+        risk_model['compliance_level'] = 'FATAL – TIMELINE DEFECT'
+        if 'fatal_defect_override' not in risk_model:
+            risk_model['fatal_defect_override'] = {
+                'applied': True,
+                'reason': 'Timeline fatal defect detected',
+                'capped_at': 25
+            }
             'original_score_display': f"{round(total_weighted, 1):.1f}/100",
             'overridden_score': _capped_at,
             'capped_at': _capped_at,
@@ -22105,5 +22169,96 @@ def create_app():
 if __name__ == '__main__':
     if FLASK_AVAILABLE:
         app = create_app()
+        print(f"""
+╔════════════════════════════════════════════════════════════════╗
+║                     JUDIQ AI API SERVER                        ║
+║            Legal Analysis Engine {ENGINE_VERSION} ENHANCED            ║
+╚════════════════════════════════════════════════════════════════╝
+
+🚀 Server starting on http://localhost:5000
+
+📊 ENHANCED FEATURES:
+  ✅ Case Strength Scoring (0-100)
+  ✅ Document Intelligence & Contradiction Detection
+  ✅ Director & Company Liability Analysis
+  ✅ Payment Dispute Systems (Invoice/Lending/Business)
+  ✅ Defence Generator & Failure Analysis
+  ✅ Strategy Engine with Settlement Recommendations
+  ✅ Outcome Prediction & Success Probability
+  ✅ Time & Cost Analysis
+  ✅ Recovery Intelligence
+  ✅ Multi-Case Comparison Dashboard
+  ✅ PDF Report Generation
+  ✅ Feedback & Learning System
+
+📡 API ENDPOINTS:
+
+  CORE ANALYSIS:
+  POST   /api/analyze              - Standard case analysis
+  POST   /api/analyze/enhanced     - Enhanced analysis (all features)
+
+  USER MANAGEMENT:
+  GET    /api/user/case-history/<email> - Get case history
+  GET    /api/user/usage/<email>   - Get usage quota
+  GET    /api/user/dashboard/<email> - User dashboard & statistics
+
+  CASE COMPARISON:
+  POST   /api/case/compare         - Compare multiple cases
+  GET    /api/case/pdf-report/<case_id> - Generate PDF report
+
+  FEEDBACK SYSTEM:
+  POST   /api/feedback             - Submit case feedback
+  GET    /api/feedback/patterns    - Get feedback patterns
+
+  SYSTEM:
+  GET    /api/health               - Health check & feature status
+
+📖 USAGE EXAMPLE:
+  curl -X POST http://localhost:5000/api/analyze/enhanced \\
+    -H "Content-Type: application/json" \\
+    -d '{
+      "user_email": "lawyer@example.com",
+      "cheque_amount": 500000,
+      "cheque_date": "2024-01-15",
+      "dishonour_date": "2024-02-01",
+      "notice_date": "2024-02-10"
+    }'
+
+Press CTRL+C to stop
+""")
         app.run(host='0.0.0.0', port=5000, debug=True)
+    else:
+        print("""
+╔════════════════════════════════════════════════════════════════╗
+║                    JUDIQ AI - ENHANCED EDITION                 ║
+║                     Command Line Interface                     ║
+╚════════════════════════════════════════════════════════════════╝
+
+ERROR: Flask not installed. Install with:
+  pip install flask flask-cors
+
+OPTIONAL DEPENDENCIES:
+  pip install firebase-admin    # For cloud storage
+  pip install reportlab          # For PDF generation
+  pip install pandas             # For data analysis
+
+CURRENT STATUS:
+  ✅ Core Analysis Engine: READY
+  ⚠️  API Server: Flask not installed
+  ⚠️  PDF Reports: {('READY' if REPORTLAB_AVAILABLE else 'ReportLab not installed')}
+  ⚠️  Cloud Storage: {('READY' if FIREBASE_AVAILABLE else 'Firebase not installed')}
+
+To use the enhanced analysis engine programmatically:
   
+  from judiq import run_enhanced_analysis
+  
+  case_data = {{
+      'cheque_amount': 500000,
+      'cheque_date': '2024-01-15',
+      'dishonour_date': '2024-02-01',
+      'notice_date': '2024-02-10'
+  }}
+  
+  result = run_enhanced_analysis(case_data)
+  print(result)
+""")
