@@ -76,7 +76,8 @@ def test_llmless_civil_graceful(monkeypatch):
 
 def test_llmless_criminal_graceful(monkeypatch):
     """
-    Criminal case (accused role) must not crash and must return final_score.
+    Submitting a standalone criminal matter to the dedicated Section 138 platform
+    must trigger an explicit, clean domain guardrail ValueError.
     """
     _disable_llm(monkeypatch)
 
@@ -93,11 +94,9 @@ def test_llmless_criminal_graceful(monkeypatch):
         ),
     }
 
-    result = analyze_case(criminal_case)
-
-    assert result is not None
-    assert "final_score" in result
-    assert isinstance(result["final_score"], (int, float))
+    import pytest
+    with pytest.raises(ValueError, match="Section 138"):
+        analyze_case(criminal_case)
 
 
 # ---------------------------------------------------------------------------

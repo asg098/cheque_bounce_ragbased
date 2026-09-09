@@ -127,8 +127,8 @@ def test_cheque_bounce_fatal_no_notice(llm_disabled):
 
 def test_criminal_case_graceful(llm_disabled):
     """
-    Criminal case data (accused role) must return a valid result dict with
-    a numeric final_score. No hard threshold — just structural completeness.
+    Submitting a non-138 criminal case to the dedicated Section 138 platform
+    must trigger an explicit, clean domain guardrail ValueError.
     """
     case_data = {
         "case_type": "Criminal",
@@ -142,11 +142,8 @@ def test_criminal_case_graceful(llm_disabled):
             "Eyewitness testimony available. Accused seeks bail."
         ),
     }
-    result = JudiQEngine.analyze_case(case_data)
-
-    assert result is not None
-    assert "final_score" in result
-    assert isinstance(result["final_score"], (int, float))
+    with pytest.raises(ValueError, match="Section 138"):
+        JudiQEngine.analyze_case(case_data)
 
 
 # ---------------------------------------------------------------------------

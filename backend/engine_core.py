@@ -107,12 +107,12 @@ class JudiQEngine:
         case_data["analysis_mode"] = analysis_mode
         logger.info(f"[JUDIQ] Core analysis triggered for: {case_data.get('case_id', 'ANON')} (Type: {case_data.get('case_type', 'Cheque Bounce')})")
 
-        # Domain Dispatch Routing — Criminal, SARFAESI, Civil, and Composite engines are disabled.
-        # Only Section 138 Negotiable Instruments Act (Cheque Bounce) engine is active.
+        # Domain Dispatch Routing — JudiQ AI is specialized on Section 138 NI Act (Cheque Bounce)
+        # Commercial / civil cheque recovery cases seamlessly route into the Section 138 engine.
         case_type_clean = (case_data.get("case_type") or "").strip().lower()
-        if case_type_clean in ("criminal", "ipc", "bns", "crpc", "bnss", "sarfaesi", "drt", "securitisation", "civil", "cpc", "composite", "multi_track", "multitrack"):
-            logger.warning(f"[JUDIQ] Requested disabled engine '{case_type_clean}'. Section 138 NI Act is the only active engine.")
-            raise ValueError(f"The '{case_type_clean}' litigation engine is currently disabled. Only Section 138 Negotiable Instruments Act (Cheque Bounce) Litigation Intelligence is enabled.")
+        if case_type_clean in ("criminal", "ipc", "bns", "crpc", "bnss", "sarfaesi", "drt", "securitisation", "composite", "multi_track", "multitrack"):
+            logger.warning(f"[JUDIQ] Requested non-138 domain engine '{case_type_clean}'. Section 138 NI Act is the active engine.")
+            raise ValueError(f"The '{case_type_clean}' litigation engine is disabled in this Section 138 NI Act release. Only Section 138 Negotiable Instruments Act (Cheque Bounce) Litigation Intelligence is active.")
 
 
         doc_intel = registry.get("document_intelligence")

@@ -252,7 +252,7 @@ class BaseScoringEngine:
             "factual_confidence": f"{int(min(95, score * 1.1))}%",
             "evidentiary_confidence": f"{int(min(98, score * 0.9))}%",
             "procedural_confidence": "95%" if case_data.get("notice_sent") and case_data.get("within_30_days") else "25%",
-            "strategic_confidence": f"{int(score)}%"
+            "strategic_confidence": f"{score}%"
         }
     @classmethod
     def calculate_self_challenge(cls, score: int, case_data: Dict, concepts: List[Dict]) -> Dict:

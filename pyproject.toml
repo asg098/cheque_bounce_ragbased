@@ -23,3 +23,41 @@ filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::UserWarning"
 ]
+norecursedirs = [
+    "multi_vertical_archive",
+    ".*",
+    "build",
+    "dist"
+]
+
+# ---------------------------------------------------------------------------
+# Pyrefly (Antigravity IDE type-checker) — point at the real Python runtime
+# so it can resolve third-party packages (fastapi, pydantic, slowapi, etc.)
+# ---------------------------------------------------------------------------
+[tool.pyrefly]
+python_interpreter = "C:/Users/Atharva/AppData/Local/Microsoft/WindowsApps/PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0/python.exe"
+site_package_path = [
+    "C:/Users/Atharva/AppData/Local/Packages/PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0/LocalCache/local-packages/Python312/site-packages",
+    "C:/Program Files/WindowsApps/PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0/Lib/site-packages"
+]
+search_path = [
+    "backend",
+    "."
+]
+
+# ---------------------------------------------------------------------------
+# Pyright / Pylance (VS Code type-checker) — same interpreter reference
+# ---------------------------------------------------------------------------
+[tool.pyright]
+pythonVersion = "3.12"
+pythonPlatform = "Windows"
+pythonPath = "C:/Users/Atharva/AppData/Local/Microsoft/WindowsApps/PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0/python.exe"
+venvPath = ""
+venv = ""
+extraPaths = [
+    "backend",
+    "backend/banking"
+]
+typeCheckingMode = "basic"
+reportMissingModuleSource = "none"
+

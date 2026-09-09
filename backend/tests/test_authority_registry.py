@@ -49,3 +49,32 @@ def test_primary_source_retriever_interface():
     assert res["success"] is False
     assert res["document_integrity_verified"] is False
     assert res["document_hash"] is None
+
+def test_production_readiness_endpoints_and_headers():
+    from fastapi.testclient import TestClient
+    from main import app
+    client = TestClient(app)
+
+    # Health, Readiness, and Liveness probes
+    res_health = client.get("/health")
+    assert res_health.status_code == 200
+    assert res_health.json()["status"] == "healthy"
+
+    res_ready = client.get("/ready")
+    assert res_ready.status_code == 200
+    assert res_ready.json()["status"] == "ready"
+
+    res_live = client.get("/live")
+    assert res_live.status_code == 200
+    assert res_live.json()["status"] == "alive"
+
+    # Enterprise security headers
+    headers = res_live.headers
+    assert headers.get("x-content-type-options") == "nosniff"
+    assert headers.get("x-frame-options") == "SAMEORIGIN"
+    assert headers.get("referrer-policy") == "strict-origin-when-cross-origin"
+    assert headers.get("x-xss-protection") == "1; mode=block"
+
+    # Protected precedent ingestion route (rejects unauthenticated)
+    res_ingest = client.post("/api/v1/ingest/precedents", json={"domain": "ni_act", "citation": "TEST"})
+    assert res_ingest.status_code in (401, 403)
