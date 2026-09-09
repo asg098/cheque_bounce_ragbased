@@ -7,19 +7,10 @@ let isWizardInitialized = false;
 let currentCaseType = null;
 
 function getCurrentSteps() {
-    const domain = (window.state?.userDomain || 'ni_act').toLowerCase();
-    let caseType = window.state?.caseData?.case_type;
-    if (!caseType) {
-        if (domain === 'composite' || domain === 'multi_track') caseType = 'Multi-Track (SARFAESI + 138 + Criminal)';
-        else if (domain === 'criminal') caseType = 'Criminal';
-        else if (domain === 'sarfaesi') caseType = 'SARFAESI';
-        else if (domain === 'civil') caseType = 'Civil';
-        else caseType = 'Cheque Bounce';
-        window.state = window.state || {};
-        window.state.caseData = window.state.caseData || {};
-        window.state.caseData.case_type = caseType;
-    }
-    return getActiveWizardSteps(caseType);
+    window.state = window.state || {};
+    window.state.caseData = window.state.caseData || {};
+    window.state.caseData.case_type = 'Cheque Bounce';
+    return wizardSteps;
 }
 
 function loadAutosave() {
@@ -171,18 +162,8 @@ export function renderWizardStep() {
     const stepIdx = Math.min(Math.max(0, currentStep - 1), steps.length - 1);
     const step = steps[stepIdx];
 
-    // Auto-lock case_type based on active steps
-    if (steps === compositeWizardSteps || (caseType && (caseType.toLowerCase().includes('composite') || caseType.toLowerCase().includes('multi_track') || caseType.toLowerCase().includes('all-in-one')))) {
-        window.state.caseData['case_type'] = 'Multi-Track (SARFAESI + 138 + Criminal)';
-    } else if (steps === criminalWizardSteps || (caseType && caseType.toLowerCase().includes('criminal'))) {
-        window.state.caseData['case_type'] = 'Criminal';
-    } else if (steps === sarfaesiWizardSteps || (caseType && caseType.toLowerCase().includes('sarfaesi'))) {
-        window.state.caseData['case_type'] = 'SARFAESI';
-    } else if (steps === civilWizardSteps || (caseType && caseType.toLowerCase().includes('civil'))) {
-        window.state.caseData['case_type'] = 'Civil';
-    } else {
-        window.state.caseData['case_type'] = 'Cheque Bounce';
-    }
+    // Auto-lock case_type strictly to Section 138 Cheque Bounce
+    window.state.caseData['case_type'] = 'Cheque Bounce';
 
     ui.setText('wizardTitle', step.title);
     ui.setText('wizardSubtitle', step.subtitle);
@@ -632,18 +613,9 @@ window.loadSampleCaseData = (forcedPreset = null) => {
     if (forcedPreset && typeof forcedPreset === 'object') {
         preset = flattenDemoData(forcedPreset);
         label = preset.case_type || 'Custom';
-    } else if (domain === 'composite' || activeCaseType.includes('composite') || activeCaseType.includes('multi')) {
-        preset = SAMPLE_COMPOSITE_PRESET;
-        label = 'Multi-Track Composite';
-    } else if (domain === 'sarfaesi' || activeCaseType.includes('sarfaesi')) {
-        preset = SAMPLE_SARFAESI_PRESET;
-        label = 'SARFAESI & DRT';
-    } else if (domain === 'criminal' || activeCaseType.includes('criminal')) {
-        preset = SAMPLE_CRIMINAL_PRESET;
-        label = 'Criminal Law';
-    } else if (domain === 'civil' || activeCaseType.includes('civil')) {
-        preset = SAMPLE_CIVIL_PRESET;
-        label = 'Civil Litigation';
+    } else {
+        preset = SAMPLE_CASE_DATA;
+        label = 'Section 138 NI Act';
     }
 
     // Assign fresh realistic dates

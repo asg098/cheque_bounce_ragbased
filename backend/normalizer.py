@@ -88,14 +88,11 @@ def validate_minimum_viability(data: dict) -> None:
     has_description  = bool(data.get("description") or data.get("caseDescription") or data.get("case_description"))
     has_pillars      = any(data.get(k) for k in ["cheque_present", "chequePresent", "dishonour_memo", "notice_sent"])
     has_wizard_cheque = bool((data.get("cheque") or {}).get("cheque_number"))
-    has_parties      = bool((data.get("parties") or {}).get("complainant") or data.get("complainant_name") or data.get("bank_name") or data.get("borrower_name") or data.get("accused_name"))
-    has_criminal     = bool(data.get("offense_type") or data.get("fir_date") or data.get("incident_date") or data.get("ipc_section"))
-    has_sarfaesi     = bool(data.get("npa_date") or data.get("notice_13_2_date") or data.get("possession_13_4_date") or data.get("cersai_registered") is not None or data.get("user_supplied_citation"))
-    is_domain_case   = str(data.get("case_type", "")).strip().lower() in ("sarfaesi", "criminal", "drt", "ipc", "bns", "crpc", "bnss", "civil")
+    has_parties      = bool((data.get("parties") or {}).get("complainant") or data.get("complainant_name") or data.get("bank_name") or data.get("accused_name"))
     is_quick_mode    = data.get("analysis_mode") == "quick"
-    if not (has_description or has_pillars or has_wizard_cheque or has_parties or has_criminal or has_sarfaesi or is_domain_case or is_quick_mode):
+    if not (has_description or has_pillars or has_wizard_cheque or has_parties or is_quick_mode):
         raise ValidationError(
-            "Insufficient case data: provide at least a case description or fill the wizard form.",
+            "Insufficient case data: provide at least a case description or fill the Section 138 case details.",
             field="description"
         )
 def normalize_input(data: dict) -> dict:

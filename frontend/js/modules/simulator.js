@@ -43,31 +43,31 @@ export class JudiQStrategySimulator {
                 counterStrategy: "Move application under Sec. 142(1)(b) proviso seeking condonation of delay with affidavit explaining sufficient cause.",
                 ratio: "Prem Chand Vijay Kumar v. Yashpal Singh (2005) — Cause of action arises only once statutory notice condition is met strictly."
             },
-            sarfaesi_npa: {
-                title: "SARFAESI DRT Action — Defective Sec 13(2) Demand Notice",
-                domain: "SARFAESI Act 2002",
-                noticeDelay: 15,
+            s138_security_cheque: {
+                title: "Cheque Bounce (Sec 138) — Security Cheque & Blank Signed Instrument",
+                domain: "NI Act Section 138",
+                noticeDelay: 10,
+                debtExisted: false,
+                securityCheque: true,
+                signatureDisputed: false,
+                evidence65B: true,
+                baseScore: 48,
+                attackVector: "Accused claims cheque was handed over as collateral/security without any existing legally enforceable debt.",
+                counterStrategy: "Invoke statutory presumption under Section 139 & 118(a) NI Act; prove consideration passed via promissory note or ledger statement.",
+                ratio: "Bir Singh v. Mukesh Kumar (2019) 4 SCC 197 — Even a blank signed cheque attracts Section 139 presumption once execution is admitted."
+            },
+            s138_electronic_records: {
+                title: "Cheque Bounce (Sec 138) — Electronic Ledger & Missing S.65B Certificate",
+                domain: "NI Act Section 138",
+                noticeDelay: 8,
                 debtExisted: true,
                 securityCheque: false,
                 signatureDisputed: false,
                 evidence65B: false,
-                baseScore: 55,
-                attackVector: "Bank failed to issue itemized breakup of principal & interest in Sec 13(2) notice and ignored borrower's Sec 13(3A) representation.",
-                counterStrategy: "File Sec. 17 Appeal before DRT challenging symbolic possession under Sec 13(4) on grounds of non-compliance with statutory 3A reply.",
-                ratio: "Mardia Chemicals Ltd. v. Union of India (2004) — Communication of reasons for rejecting representation is mandatory."
-            },
-            cyber_fraud_65b: {
-                title: "Cyber Fraud & Commercial Breach — Missing 65B Certificate",
-                domain: "Criminal Law / IT Act",
-                noticeDelay: 0,
-                debtExisted: false,
-                securityCheque: false,
-                signatureDisputed: false,
-                evidence65B: false,
-                baseScore: 35,
-                attackVector: "WhatsApp chats, email printouts, and server logs presented without mandatory Section 65B Electronic Evidence Certificate.",
-                counterStrategy: "Raise threshold objection during evidence stage against admissibility of secondary electronic evidence.",
-                ratio: "Anvar P.V. v. P.K. Basheer (2014) & Arjun Panditrao Khotkar (2020) — S.65B Certificate is an indispensable condition precedent."
+                baseScore: 42,
+                attackVector: "WhatsApp confirmation chats, email demands, and computerized bank statements submitted without mandatory Section 65B Certificate / BSA Section 63.",
+                counterStrategy: "Produce Section 65B / BSA Section 63 certificate by the system administrator during trial to cure evidentiary inadmissibility.",
+                ratio: "Arjun Panditrao Khotkar v. Kailash Kushanrao Gorantyal (2020) — S.65B Certificate is an indispensable condition precedent for secondary electronic records."
             }
         };
 

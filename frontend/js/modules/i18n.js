@@ -23,7 +23,7 @@ window.i18n = {
             nav_logout: "Logout",
             load_demo_case: "Load Demo Case",
             hero_title: "Find Fatal Legal Defects Before The Courtroom Does",
-            hero_sub: "Adversarial litigation intelligence, Section 138 cheque bounce audit, SARFAESI NPA enforcement, and automated legal draft generator.",
+            hero_sub: "Adversarial litigation intelligence, Section 138 cheque bounce audit, statutory limitation computing, and automated legal draft generator.",
             start_analysis: "Start Case Analysis",
             select_domain: "Select Legal Domain",
             domain_ni: "Cheque Bounce (Section 138 NI Act)",

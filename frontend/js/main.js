@@ -390,32 +390,17 @@ window.selectRegisterDomain = (domain) => {
 };
 
 /**
- * Switch active legal domain dynamically inside dashboard
+ * Switch active legal domain dynamically inside dashboard — locked to Section 138 NI Act
  */
 window.switchUserDomain = (domain, tabEl) => {
-    window.state.userDomain = domain;
+    window.state.userDomain = 'ni_act';
     if (window.state.currentUser) {
-        localStorage.setItem(`judiq_domain_${window.state.currentUser.uid}`, domain);
+        localStorage.setItem(`judiq_domain_${window.state.currentUser.uid}`, 'ni_act');
     }
     document.querySelectorAll('.domain-switch-tab').forEach(t => t.classList.remove('active'));
-    if (tabEl) {
-        tabEl.classList.add('active');
-    } else {
-        const targetTab = document.getElementById(`tab_domain_${domain === 'ni_act' ? 'ni' : domain}`);
-        if (targetTab) targetTab.classList.add('active');
-    }
+    const targetTab = document.getElementById('tab_domain_ni') || document.getElementById('tab_domain_all');
+    if (targetTab) targetTab.classList.add('active');
     renderDashboard();
-    if (window.ui && typeof window.ui.toast === 'function') {
-        const names = {
-            all: 'Full Practice (All Modules)',
-            composite: 'Multi-Track (SARFAESI + 138 + Criminal)',
-            ni_act: 'Section 138 Cheque Bounce',
-            sarfaesi: 'SARFAESI / DRT Enforcement',
-            criminal: 'Criminal Law (BNS / IPC)',
-            civil: 'Civil & Commercial Suits'
-        };
-        window.ui.toast(`Switched to ${names[domain] || domain}`, 'info');
-    }
 };
 
 window.logout = () => {
@@ -440,11 +425,12 @@ window.selectRole = (role) => {
 
 function renderDashboard() {
     const role = window.state.currentRole || 'citizen';
-    const domain = (window.state.userDomain || 'all').toLowerCase();
+    const domain = 'ni_act';
+    window.state.userDomain = 'ni_act';
 
     // Update active tab highlight in quick-switch bar
     document.querySelectorAll('.domain-switch-tab').forEach(t => t.classList.remove('active'));
-    const activeTab = document.getElementById(`tab_domain_${domain === 'ni_act' ? 'ni' : domain}`) || document.getElementById('tab_domain_all');
+    const activeTab = document.getElementById('tab_domain_ni') || document.getElementById('tab_domain_all');
     if (activeTab) activeTab.classList.add('active');
 
     // Domain badge in dashboard nav
@@ -455,25 +441,8 @@ function renderDashboard() {
             badge = document.createElement('span');
             dashNav.appendChild(badge);
         }
-        if (domain === 'composite') {
-            badge.className = 'domain-badge domain-badge--composite';
-            badge.innerHTML = '<i class="fas fa-bolt"></i> Multi-Track Composite';
-        } else if (domain === 'criminal') {
-            badge.className = 'domain-badge domain-badge--criminal';
-            badge.innerHTML = '<i class="fas fa-user-shield"></i> Criminal Law (IPC/BNS)';
-        } else if (domain === 'civil') {
-            badge.className = 'domain-badge domain-badge--civil';
-            badge.innerHTML = '<i class="fas fa-balance-scale"></i> Civil / CPC Litigation';
-        } else if (domain === 'sarfaesi') {
-            badge.className = 'domain-badge domain-badge--sarfaesi';
-            badge.innerHTML = '<i class="fas fa-university"></i> SARFAESI / DRT';
-        } else if (domain === 'ni_act') {
-            badge.className = 'domain-badge domain-badge--ni';
-            badge.innerHTML = '<i class="fas fa-file-invoice-dollar"></i> NI Act — S.138';
-        } else {
-            badge.className = 'domain-badge domain-badge--all';
-            badge.innerHTML = '<i class="fas fa-layer-group"></i> Full Practice OS (All Domains)';
-        }
+        badge.className = 'domain-badge domain-badge--ni';
+        badge.innerHTML = '<i class="fas fa-file-invoice-dollar"></i> NI Act — Section 138';
     }
 
     // Admin check & Quota synchronization

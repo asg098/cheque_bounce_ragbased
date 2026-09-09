@@ -30,7 +30,7 @@ export const wizardSteps = [
             { name: 'filing_date', label: 'Filing Date', type: 'date', required: true },
             { name: 'court_name', label: 'Court Name', type: 'text', required: false, placeholder: 'e.g., District Court, Mumbai' },
             { name: 'condonation_attached', label: 'Condonation of Delay App Attached? (S.142)', type: 'select', options: ['Yes', 'No', 'Not Applicable'], required: false },
-            { name: 'case_type', label: 'Case Type', type: 'select', options: ['Cheque Bounce', 'SARFAESI', 'Criminal', 'Civil', 'Multi-Track (SARFAESI + 138 + Criminal)'], required: true },
+            { name: 'case_type', label: 'Case Type', type: 'select', options: ['Cheque Bounce (Section 138 NI Act)'], required: true },
             { name: 'judicial_temperament', label: 'Judicial Temperament / Courtroom Mood', type: 'select', options: ['Balanced', 'Pro-Complainant', 'Pro-Accused'], required: false }
         ]
     },
@@ -424,19 +424,7 @@ export const compositeWizardSteps = [
 ];
 
 export function getActiveWizardSteps(caseType) {
-    const type = (caseType || '').toLowerCase();
-    if (type.includes('composite') || type.includes('multi_track') || type.includes('multitrack') || type.includes('unified') || type.includes('all-in-one')) {
-        return compositeWizardSteps;
-    }
-    if (type.includes('criminal') || type.includes('bns') || type.includes('ipc') || type.includes('fir')) {
-        return criminalWizardSteps;
-    }
-    if (type.includes('sarfaesi') || type.includes('drt') || type.includes('npa') || type.includes('bank')) {
-        return sarfaesiWizardSteps;
-    }
-    if (type.includes('civil') || type.includes('cpc') || type.includes('commercial')) {
-        return civilWizardSteps;
-    }
+    // Only Section 138 (Cheque Bounce) wizard is active
     return wizardSteps;
 }
 
@@ -475,12 +463,7 @@ export const roleActions = {
 
 // ── CMS Configuration & Enums ─────────────────────────────────
 export const caseTypes = [
-    { value: 'section_138', label: 'Section 138 (Cheque Bounce)', icon: 'fa-file-invoice-dollar', color: '#3b82f6' },
-    { value: 'sarfaesi', label: 'SARFAESI / DRT Enforcement', icon: 'fa-university', color: '#10b981' },
-    { value: 'drt', label: 'DRT Debt Recovery', icon: 'fa-landmark', color: '#8b5cf6' },
-    { value: 'ibc', label: 'IBC / NCLT Insolvency', icon: 'fa-building', color: '#f59e0b' },
-    { value: 'criminal', label: 'Criminal Law (BNS / IPC)', icon: 'fa-user-shield', color: '#ef4444' },
-    { value: 'civil', label: 'Civil / CPC Litigation', icon: 'fa-balance-scale', color: '#6366f1' }
+    { value: 'section_138', label: 'Section 138 (Cheque Bounce)', icon: 'fa-file-invoice-dollar', color: '#3b82f6' }
 ];
 
 export const caseStatuses = [

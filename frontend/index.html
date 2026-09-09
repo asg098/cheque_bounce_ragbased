@@ -26,7 +26,7 @@
         <div class="compliance-bar-content">
             <span class="compliance-badge"><i class="fas fa-shield-halved"></i> INSTITUTIONAL LITIGATION OS</span>
             <span class="compliance-divider">•</span>
-            <span><i class="fas fa-scale-balanced"></i> Section 138 NI Act & CrPC Statutory Engines</span>
+            <span><i class="fas fa-scale-balanced"></i> Section 138 Negotiable Instruments Act Statutory Engine</span>
             <span class="compliance-divider">•</span>
             <span class="compliance-status"><i class="fas fa-lock"></i> 256-Bit Military Vault Encryption</span>
         </div>
@@ -83,9 +83,7 @@
                     <!-- <button class="btn btn-outline hide-on-mobile cms-nav-btn u-is-4" onclick="switchScreen('caseListScreen')">
                         <i class="fas fa-briefcase"></i> Case Management
                     </button> -->
-                    <button class="btn btn-outline hide-on-mobile bank-nav-btn u-is-5" onclick="switchScreen('bankRecoveryScreen')">
-                        <i class="fas fa-building-columns"></i> Bank Recovery OS
-                    </button>
+                    
                     <button class="btn btn-outline btn-sm cmd-palette-trigger hide-on-mobile u-is-6" title="Command Palette (Ctrl+K)" onclick="toggleCommandPalette()">
                         <i class="fas fa-terminal u-is-7"></i> <span class="hide-on-mobile">Ctrl K</span>
                     </button>
@@ -120,9 +118,7 @@
                     <a href="#" onclick="toggleMobileNav(false); openLegalModal('documentationModal', event)" data-i18n="nav_docs"><i class="fas fa-book"></i> Docs</a>
                 </div>
                 <div class="mobile-nav-actions">
-                    <button class="btn btn-outline u-is-10" onclick="toggleMobileNav(false); switchScreen('bankRecoveryScreen');">
-                        <i class="fas fa-building-columns"></i> Bank & Recovery OS
-                    </button>
+                    
                     <button class="btn btn-outline btn-sm lang-toggle-btn u-is-11" onclick="toggleLanguage();">
                         <i class="fas fa-globe"></i> <span>मराठी / English</span>
                     </button>
@@ -244,11 +240,11 @@
                         <button class="sim-preset-btn" data-preset="s138_notice_delay" onclick="selectSimulatorPreset('s138_notice_delay')">
                             <i class="fas fa-clock"></i> S.138 Notice Delay (>30 Days)
                         </button>
-                        <button class="sim-preset-btn" data-preset="sarfaesi_npa" onclick="selectSimulatorPreset('sarfaesi_npa')">
-                            <i class="fas fa-building-columns"></i> SARFAESI Sec 13(2) Defect
+                        <button class="sim-preset-btn" data-preset="s138_security_cheque" onclick="selectSimulatorPreset('s138_security_cheque')">
+                            <i class="fas fa-shield-halved"></i> S.138 Security Cheque
                         </button>
-                        <button class="sim-preset-btn" data-preset="cyber_fraud_65b" onclick="selectSimulatorPreset('cyber_fraud_65b')">
-                            <i class="fas fa-file-code"></i> Missing Sec.65B Certificate
+                        <button class="sim-preset-btn" data-preset="s138_electronic_records" onclick="selectSimulatorPreset('s138_electronic_records')">
+                            <i class="fas fa-file-code"></i> Missing S.65B Certificate
                         </button>
                     </div>
 
@@ -415,7 +411,7 @@
                     <!-- Column 2: Precedent Finder -->
                     <div class="precedent-card">
                         <h3>Landmark Precedent & Authority Explorer</h3>
-                        <p class="u-is-23">Search verified landmark Supreme Court judgments across Criminal (BNS/BNSS), SARFAESI/DRT, NI Act 138, Civil & Commercial Suits, and Arbitration with direct Indian Kanoon & Official Law Report links:</p>
+                        <p class="u-is-23">Search verified landmark Supreme Court judgments across Section 138 Negotiable Instruments Act (Cheque Bounce), Statutory Limitation, Notice Service, and Director Vicarious Liability with direct Indian Kanoon &amp; Official Law Report links:</p>
                         
                         <div class="search-wrapper">
                             <i class="fas fa-search"></i>
@@ -423,14 +419,12 @@
                         </div>
 
                         <div class="precedent-tag-pills u-is-27">
-                            <button class="precedent-tag-pill sim-preset-btn active" onclick="filterPrecedentByTag('', this)">#AllDomains</button>
-                            <button class="precedent-tag-pill sim-preset-btn" onclick="filterPrecedentByTag('bail', this)">#Bail_BNSS</button>
-                            <button class="precedent-tag-pill sim-preset-btn" onclick="filterPrecedentByTag('quash', this)">#Quashing_482</button>
-                            <button class="precedent-tag-pill sim-preset-btn" onclick="filterPrecedentByTag('sarfaesi', this)">#SARFAESI_DRT</button>
+                            <button class="precedent-tag-pill sim-preset-btn active" onclick="filterPrecedentByTag('', this)">#All_S138</button>
                             <button class="precedent-tag-pill sim-preset-btn" onclick="filterPrecedentByTag('cheque', this)">#NI_Act_138</button>
-                            <button class="precedent-tag-pill sim-preset-btn" onclick="filterPrecedentByTag('arbitrat', this)">#Arbitration</button>
-                            <button class="precedent-tag-pill sim-preset-btn" onclick="filterPrecedentByTag('injunction', this)">#Civil_Injunctions</button>
-                            <button class="precedent-tag-pill sim-preset-btn" onclick="filterPrecedentByTag('pmla', this)">#PMLA_Fraud</button>
+                            <button class="precedent-tag-pill sim-preset-btn" onclick="filterPrecedentByTag('notice', this)">#Notice_Defect</button>
+                            <button class="precedent-tag-pill sim-preset-btn" onclick="filterPrecedentByTag('director', this)">#Director_141</button>
+                            <button class="precedent-tag-pill sim-preset-btn" onclick="filterPrecedentByTag('security', this)">#Security_Cheque</button>
+                            <button class="precedent-tag-pill sim-preset-btn" onclick="filterPrecedentByTag('interim', this)">#Interim_143A</button>
                         </div>
                         
                         <div id="precedentsListContainer" class="citations-list-container">
@@ -538,59 +532,7 @@
                                 </div>
                             </label>
 
-                            <!-- Module 2: SARFAESI -->
-                            <label class="module-choice-card" data-module="sarfaesi">
-                                <input type="checkbox" name="legal_module" value="sarfaesi" onchange="updateModularPricing()">
-                                <div class="module-card-body">
-                                    <div class="module-card-icon"><i class="fas fa-building-columns"></i></div>
-                                    <div class="module-card-info">
-                                        <h4>SARFAESI Act &amp; DRT Recovery</h4>
-                                        <p>S.13(2) demand notices, 15-day S.13(3A) disposal SLA, S.14 CMM possession, CERSAI S.26D &amp; Agri land bars.</p>
-                                    </div>
-                                    <div class="module-quota-pill">10 Cases / mo</div>
-                                </div>
-                            </label>
-
-                            <!-- Module 3: Criminal BNSS -->
-                            <label class="module-choice-card" data-module="criminal">
-                                <input type="checkbox" name="legal_module" value="criminal" onchange="updateModularPricing()">
-                                <div class="module-card-body">
-                                    <div class="module-card-icon"><i class="fas fa-handcuffs"></i></div>
-                                    <div class="module-card-info">
-                                        <h4>Criminal Law (CrPC / BNSS 2023 &amp; BNS)</h4>
-                                        <p>Triple Test regular &amp; anticipatory bail calculator, S.167(2) default bail, and S.482/S.528 quashing audit (Bhajan Lal).</p>
-                                    </div>
-                                    <div class="module-quota-pill">10 Cases / mo</div>
-                                </div>
-                            </label>
-
-                            <!-- Module 4: Civil CPC -->
-                            <label class="module-choice-card" data-module="civil">
-                                <input type="checkbox" name="legal_module" value="civil" onchange="updateModularPricing()">
-                                <div class="module-card-body">
-                                    <div class="module-card-icon"><i class="fas fa-scale-balanced"></i></div>
-                                    <div class="module-card-info">
-                                        <h4>Civil Suits &amp; Commercial Courts Act</h4>
-                                        <p>Order XXXVII summary debt recovery (Hubtown test), Order VII Rule 11 rejection of plaint, and S.12A Mediation audit.</p>
-                                    </div>
-                                    <div class="module-quota-pill">10 Cases / mo</div>
-                                </div>
-                            </label>
-
-                            <!-- Module 5: Banking Recovery OS -->
-                            <label class="module-choice-card" data-module="bank_recovery">
-                                <input type="checkbox" name="legal_module" value="bank_recovery" onchange="updateModularPricing()">
-                                <div class="module-card-body">
-                                    <div class="module-card-icon"><i class="fas fa-shield-halved"></i></div>
-                                    <div class="module-card-info">
-                                        <h4>Institutional Banking &amp; 5-Track OS</h4>
-                                        <p>Concurrent 5-track strategy, OTS vs Litigation NPV engine with RBI provisioning write-back, and counsel dispatch SLA.</p>
-                                    </div>
-                                    <div class="module-quota-pill">10 Cases / mo</div>
-                                </div>
-                            </label>
-
-                            <!-- Module 6: Opposing Counsel Intel -->
+                            <!-- Module 2: Opposing Counsel Intel -->
                             <label class="module-choice-card" data-module="counsel_intel">
                                 <input type="checkbox" name="legal_module" value="counsel_intel" onchange="updateModularPricing()">
                                 <div class="module-card-body">
@@ -708,7 +650,7 @@
                             <i class="fas fa-chevron-down"></i>
                         </div>
                         <div class="faq-answer">
-                            <p>You can start analyzing cases immediately by clicking 'Get Started' or loading one of our pre-configured Section 138 / SARFAESI demo cases. No installation or complex setup is required.</p>
+                            <p>You can start analyzing cases immediately by clicking 'Get Started' or loading one of our pre-configured Section 138 demo cases. No installation or complex setup is required.</p>
                         </div>
                     </div>
                     <div class="faq-item">
@@ -981,46 +923,16 @@
                         <!-- Domain Picker — Select primary legal specialization or full access -->
                         <div class="domain-picker-section">
                             <div class="domain-picker-label">Select Your Legal Specialization or Full Access <span class="u-is-21">*</span></div>
-                            <div class="domain-picker u-is-42" id="domainPickerGrid">
-                                <div class="domain-card selected--all" id="domainCard_all" onclick="selectRegisterDomain('all')">
-                                    <span class="dc-check" id="domainCheck_all"><i class="fas fa-check"></i></span>
-                                    <span class="dc-icon">🏛️</span>
-                                    <span class="dc-title">Full Practice (All Domains)</span>
-                                    <span class="dc-sub">Unrestricted access to all 5 statutory litigation modules</span>
-                                </div>
-                                <div class="domain-card" id="domainCard_composite" onclick="selectRegisterDomain('composite')">
-                                    <span class="dc-check" id="domainCheck_composite"><i class="fas fa-check"></i></span>
-                                    <span class="dc-icon">⚡</span>
-                                    <span class="dc-title">Multi-Track Composite</span>
-                                    <span class="dc-sub">Concurrent SARFAESI + Sec 138 + Criminal Recovery Engine</span>
-                                </div>
-                                <div class="domain-card" id="domainCard_ni" onclick="selectRegisterDomain('ni_act')">
-                                    <span class="dc-check" id="domainCheck_ni"><i class="fas fa-check"></i></span>
+                            <div class="domain-picker u-is-42" id="domainPickerGrid" style="grid-template-columns: 1fr;">
+                                <div class="domain-card selected--ni" id="domainCard_ni" onclick="selectRegisterDomain('ni_act')">
+                                    <span class="dc-check" id="domainCheck_ni" style="display:inline-block;"><i class="fas fa-check"></i></span>
                                     <span class="dc-icon">⚖️</span>
-                                    <span class="dc-title">NI Act — Section 138</span>
-                                    <span class="dc-sub">Cheque Bounce, S.139 Presumptions, S.143A Compensation</span>
-                                </div>
-                                <div class="domain-card" id="domainCard_sarfaesi" onclick="selectRegisterDomain('sarfaesi')">
-                                    <span class="dc-check" id="domainCheck_sarfaesi"><i class="fas fa-check"></i></span>
-                                    <span class="dc-icon">🏦</span>
-                                    <span class="dc-title">SARFAESI / DRT</span>
-                                    <span class="dc-sub">Secured Asset Recovery, S.13(2)/13(4), CERSAI, DRT S.A.</span>
-                                </div>
-                                <div class="domain-card" id="domainCard_criminal" onclick="selectRegisterDomain('criminal')">
-                                    <span class="dc-check" id="domainCheck_criminal"><i class="fas fa-check"></i></span>
-                                    <span class="dc-icon">🛡️</span>
-                                    <span class="dc-title">Criminal (BNS / IPC)</span>
-                                    <span class="dc-sub">Bail S.438/439, S.482 Quashing, S.318/420 Cheating Defense</span>
-                                </div>
-                                <div class="domain-card" id="domainCard_civil" onclick="selectRegisterDomain('civil')">
-                                    <span class="dc-check" id="domainCheck_civil"><i class="fas fa-check"></i></span>
-                                    <span class="dc-icon">📜</span>
-                                    <span class="dc-title">Civil & Commercial</span>
-                                    <span class="dc-sub">Commercial Suits, Specific Performance, Order 39 Injunctions</span>
+                                    <span class="dc-title">NI Act — Section 138 Litigation Intelligence</span>
+                                    <span class="dc-sub">Cheque Dishonour, Statutory Limitation, S.139 Presumptions, S.141 Vicarious Liability &amp; S.143A Interim Compensation</span>
                                 </div>
                             </div>
                             <div class="domain-picker-error" id="domainPickerError">Please select your legal domain to continue.</div>
-                            <input type="hidden" id="registerDomain" value="all">
+                            <input type="hidden" id="registerDomain" value="ni_act">
                         </div>
 
                         <div class="form-group checkbox-group u-is-43">
@@ -1180,27 +1092,11 @@
                 </div>
 
                 <!-- Domain / Legal Area Quick Switcher -->
-                <div class="domain-quick-switch-bar u-is-55">
-                    <button class="btn btn-sm domain-switch-tab active u-is-56" id="tab_domain_all" onclick="window.switchUserDomain('all', this)">
-                        <i class="fas fa-layer-group"></i> All Modules
-                    </button>
-                    <button class="btn btn-sm domain-switch-tab u-is-56" id="tab_domain_composite" onclick="window.switchUserDomain('composite', this)">
-                        <i class="fas fa-bolt u-is-41"></i> Multi-Track (SARFAESI + 138 + Criminal)
-                    </button>
-                    <button class="btn btn-sm domain-switch-tab u-is-56" id="tab_domain_ni" onclick="window.switchUserDomain('ni_act', this)">
-                        <i class="fas fa-file-invoice-dollar u-is-57"></i> S.138 Cheque Bounce
-                    </button>
-                    <button class="btn btn-sm domain-switch-tab u-is-56" id="tab_domain_sarfaesi" onclick="window.switchUserDomain('sarfaesi', this)">
-                        <i class="fas fa-university u-is-22"></i> SARFAESI / DRT
-                    </button>
-                    <button class="btn btn-sm domain-switch-tab u-is-56" id="tab_domain_criminal" onclick="window.switchUserDomain('criminal', this)">
-                        <i class="fas fa-user-shield u-is-21"></i> Criminal (BNS / IPC)
-                    </button>
-                    <button class="btn btn-sm domain-switch-tab u-is-56" id="tab_domain_civil" onclick="window.switchUserDomain('civil', this)">
-                        <i class="fas fa-balance-scale u-is-58"></i> Civil & Commercial
+                <div class="domain-quick-switch-bar u-is-55" style="border: none; background: transparent; padding: 0.25rem 0;">
+                    <button class="btn btn-sm domain-switch-tab active u-is-56" id="tab_domain_ni" onclick="window.switchUserDomain('ni_act', this)">
+                        <i class="fas fa-file-invoice-dollar u-is-57"></i> Section 138 NI Act Litigation Intelligence
                     </button>
                 </div>
-
 
                 <!-- Action Cards Grid -->
                 <div id="actionCardsGrid" class="action-cards-grid"></div>
@@ -1236,7 +1132,7 @@
                     <div class="draft-gen-header">
                         <div class="draft-gen-badge"><i class="fas fa-file-contract"></i> Draft Studio</div>
                         <h2>Select Document Type</h2>
-                        <p>Choose from 13 court-ready legal documents — cheque bounce, criminal complaints, SARFAESI notices, affidavits & more</p>
+                        <p>Choose from court-ready Section 138 legal documents — statutory demand notices, complaints, section 143A applications, affidavits &amp; more</p>
                     </div>
                     <div class="draft-type-grid" id="studioDraftTypeGrid"></div>
                 </div>
@@ -1486,42 +1382,10 @@
                         <i class="fas fa-file-contract"></i> Generate Draft
                     </button>
                 </div>
-                <!-- SARFAESI / DRT Tab Group (hidden until domain applies) -->
-                <div class="results-tabs hidden" id="sarfaesiTabs">
-                    <button class="tab-button active" data-tab="sarfaesi_overview" onclick="switchResultTab('sarfaesi_overview')">
-                        <i class="fas fa-tachometer-alt"></i> Overview
-                    </button>
-                    <button class="tab-button" data-tab="sarfaesi_enforcement" onclick="switchResultTab('sarfaesi_enforcement')">
-                        <i class="fas fa-gavel"></i> Enforcement Timeline
-                    </button>
-                    <button class="tab-button" data-tab="sarfaesi_graph" onclick="switchResultTab('sarfaesi_graph')">
-                        <i class="fas fa-network-wired"></i> Procedural Graph
-                    </button>
-                    <button class="tab-button" data-tab="sarfaesi_strategy" onclick="switchResultTab('sarfaesi_strategy')">
-                        <i class="fas fa-chess"></i> Strategy
-                    </button>
-                    <button class="tab-button" data-tab="draft" onclick="switchResultTab('draft')">
-                        <i class="fas fa-file-alt"></i> Draft
-                    </button>
-                </div>
-                <!-- Criminal Law Tab Group (hidden until domain applies) -->
-                <div class="results-tabs hidden" id="criminalTabs">
-                    <button class="tab-button active" data-tab="criminal_overview" onclick="switchResultTab('criminal_overview')">
-                        <i class="fas fa-tachometer-alt"></i> Overview
-                    </button>
-                    <button class="tab-button" data-tab="criminal_bail" onclick="switchResultTab('criminal_bail')">
-                        <i class="fas fa-key"></i> Bail & Custody
-                    </button>
-                    <button class="tab-button" data-tab="criminal_quashing" onclick="switchResultTab('criminal_quashing')">
-                        <i class="fas fa-shield-halved"></i> Bhajan Lal Quashing
-                    </button>
-                    <button class="tab-button" data-tab="criminal_evidence" onclick="switchResultTab('criminal_evidence')">
-                        <i class="fas fa-microscope"></i> Forensics & Cross-Exam
-                    </button>
-                    <button class="tab-button" data-tab="draft" onclick="switchResultTab('draft')">
-                        <i class="fas fa-file-alt"></i> Draft
-                    </button>
-                </div>
+                
+                
+                
+                
 
 
                 <!-- ADVOCATE-GRADE FATAL ALERTS -->
@@ -1938,16 +1802,7 @@
                                         <option value="DEFENCE_REPLY">🛡️ Reply to Statutory Demand Notice</option>
                                         <option value="CONDONATION_DELAY">⏳ Application for Condonation of Delay</option>
                                     </optgroup>
-                                    <optgroup label="SARFAESI / DRT">
-                                        <option value="SARFAESI_13_2_NOTICE">🏛️ S.13(2) Demand Notice</option>
-                                        <option value="SARFAESI_13_3A_REPLY">📝 S.13(3A) Reasoned Reply / Decision</option>
-                                        <option value="SARFAESI_13_4_POSSESSION_NOTICE">🏢 S.13(4) Possession Notice</option>
-                                        <option value="SARFAESI_SEC_14_APPLICATION">⚖️ S.14 Magistrate Possession Application</option>
-                                        <option value="SARFAESI_SEC_14_AFFIDAVIT">📜 S.14 9-Point Mandatory Affidavit</option>
-                                        <option value="SARFAESI_RULE_8_6_AUCTION_NOTICE">📢 Rule 8(6)/9(1) 30-Day Auction Notice</option>
-                                        <option value="SARFAESI_SEC_17_SA_PETITION">🏛️ S.17 Securitisation Application (DRT)</option>
-                                        <option value="SARFAESI_WRITTEN_STATEMENT">🛡️ DRT Written Statement / Bank Reply</option>
-                                    </optgroup>
+                                    
                                 </select>
                             </div>
                         </div>
@@ -1989,172 +1844,7 @@
                 </div>
                 <!-- End Tab: Draft -->
 
-                <!-- ═══ SARFAESI DOMAIN TABS (hidden by default — activated by applyDomainTheme) ═══ -->
-
-                <!-- Tab: SARFAESI Overview -->
-                <div id="tabSarfaesi_overview" class="tab-content hidden">
-                    <!-- SARFAESI fatal/abstain alerts -->
-                    <div id="sarfaesiAbstainAlert" class="fatal-alert-container hidden"></div>
-                    <!-- Score hero card reused via JS -->
-                    <div id="sarfaesiScoreHero"></div>
-                    <!-- Enforcement Stage + CERSAI Status Panel -->
-                    <div class="sarfaesi-enforcement-panel" id="sarfaesiEnforcementOverview">
-                        <h3><i class="fas fa-landmark"></i> Enforcement Status</h3>
-                        <div class="u-is-112" id="sarfaesiStageDisplay"></div>
-                        <div id="sarfaesiCersaiStatus"></div>
-                    </div>
-                    <!-- SARFAESI Metric Cards -->
-                    <div class="metrics-grid" id="sarfaesiMetricsGrid">
-                        <div class="metric-card">
-                            <div class="metric-icon"><i class="fas fa-network-wired"></i></div>
-                            <div class="metric-content"><h4>Enforcement Stage</h4><p id="sarfaesiStageMetric">—</p></div>
-                        </div>
-                        <div class="metric-card">
-                            <div class="metric-icon"><i class="fas fa-shield-check"></i></div>
-                            <div class="metric-content"><h4>CERSAI Status</h4><p id="sarfaesiCersaiMetric">—</p></div>
-                        </div>
-                        <div class="metric-card">
-                            <div class="metric-icon"><i class="fas fa-exclamation-triangle"></i></div>
-                            <div class="metric-content"><h4>Evidence Gaps</h4><p id="sarfaesiGapsMetric">0</p></div>
-                        </div>
-                        <div class="metric-card">
-                            <div class="metric-icon"><i class="fas fa-tasks"></i></div>
-                            <div class="metric-content"><h4>Next Actions</h4><p id="sarfaesiActionsMetric">0</p></div>
-                        </div>
-                    </div>
-                    <!-- Evidence Gaps -->
-                    <div class="result-card u-is-77">
-                        <h3><i class="fas fa-folder-open u-is-41"></i> Evidence Gaps Detected</h3>
-                        <div id="sarfaesiEvidenceGapsList"></div>
-                    </div>
-                    <!-- Next Best Actions -->
-                    <div class="result-card u-is-32">
-                        <h3><i class="fas fa-list-check u-is-41"></i> Next Best Actions</h3>
-                        <div id="sarfaesiNextActionsList"></div>
-                    </div>
-                </div>
-                <!-- End Tab: SARFAESI Overview -->
-
-                <!-- Tab: SARFAESI Enforcement Timeline -->
-                <div id="tabSarfaesi_enforcement" class="tab-content hidden">
-                    <div class="result-card">
-                        <h3><i class="fas fa-gavel u-is-41"></i> Enforcement Milestone Timeline</h3>
-                        <p class="card-subtitle">Statutory milestones under SARFAESI Act, 2002 mapped to your case facts</p>
-                        <div id="sarfaesiTimelineList"></div>
-                    </div>
-                    <div class="result-card u-is-32">
-                        <h3><i class="fas fa-exclamation-circle u-is-21"></i> Procedural Defects &amp; Contradictions</h3>
-                        <div id="sarfaesiContradictionsList"></div>
-                    </div>
-                </div>
-                <!-- End Tab: SARFAESI Enforcement -->
-
-                <!-- Tab: SARFAESI Procedural Graph -->
-                <div id="tabSarfaesi_graph" class="tab-content hidden">
-                    <div class="result-card">
-                        <h3><i class="fas fa-network-wired u-is-41"></i> Procedural Stage Graph</h3>
-                        <p class="card-subtitle">Current litigation stage and all upstream/downstream statutory milestones</p>
-                        <div id="sarfaesiProceduralGraph"></div>
-                    </div>
-                    <div class="result-card u-is-32">
-                        <h3><i class="fas fa-shield-alt u-is-41"></i> Verified Legal Authority</h3>
-                        <div id="sarfaesiAuthorityCard"></div>
-                    </div>
-                </div>
-                <!-- End Tab: SARFAESI Graph -->
-
-                <!-- Tab: SARFAESI Strategy -->
-                <div id="tabSarfaesi_strategy" class="tab-content hidden">
-                    <div class="result-card">
-                        <h3><i class="fas fa-chess u-is-41"></i> Litigation Strategy</h3>
-                        <div id="sarfaesiStrategyList"></div>
-                    </div>
-                    <div class="result-card u-is-32">
-                        <h3><i class="fas fa-user-shield u-is-41"></i> Predicted Defence Vectors</h3>
-                        <div id="sarfaesiDefencesList"></div>
-                    </div>
-                    <div class="result-card u-is-32">
-                        <h3><i class="fas fa-brain u-is-41"></i> AI Reasoning Trace</h3>
-                        <div id="sarfaesiReasoningList"></div>
-                    </div>
-                </div>
-                <!-- End Tab: SARFAESI Strategy -->
-
-                <!-- ═══ CRIMINAL DOMAIN TABS (hidden by default — activated by applyDomainTheme) ═══ -->
-
-                <!-- Tab: Criminal Overview -->
-                <div id="tabCriminal_overview" class="tab-content hidden">
-                    <!-- Fatal alerts container -->
-                    <div id="criminalFatalAlerts" class="fatal-alert-container hidden"></div>
-                    <!-- Criminal Metrics Grid -->
-                    <div class="metrics-grid" id="criminalMetricsGrid">
-                        <div class="metric-card">
-                            <div class="metric-icon u-is-113"><i class="fas fa-gavel"></i></div>
-                            <div class="metric-content"><h4>Primary Offense</h4><p id="criminalOffenseMetric">—</p></div>
-                        </div>
-                        <div class="metric-card">
-                            <div class="metric-icon u-is-114"><i class="fas fa-key"></i></div>
-                            <div class="metric-content"><h4>Bail Viability</h4><p id="criminalBailMetric">—</p></div>
-                        </div>
-                        <div class="metric-card">
-                            <div class="metric-icon u-is-115"><i class="fas fa-shield-halved"></i></div>
-                            <div class="metric-content"><h4>Quashing Viability</h4><p id="criminalQuashingMetric">—</p></div>
-                        </div>
-                        <div class="metric-card">
-                            <div class="metric-icon u-is-116"><i class="fas fa-hourglass-half"></i></div>
-                            <div class="metric-content"><h4>Remand / Custody</h4><p id="criminalCustodyMetric">—</p></div>
-                        </div>
-                    </div>
-                    <!-- Criminal Triggered Rules / Statutory Bars -->
-                    <div class="result-card u-is-77">
-                        <h3><i class="fas fa-scale-balanced u-is-21"></i> Mandatory Statutory Bars & Landmark Rulings</h3>
-                        <div id="criminalStatutoryRulesList"></div>
-                    </div>
-                    <!-- Next Defense Best Actions -->
-                    <div class="result-card u-is-32">
-                        <h3><i class="fas fa-list-check u-is-57"></i> Prioritized Criminal Defense Roadmap</h3>
-                        <div id="criminalNextActionsList"></div>
-                    </div>
-                </div>
-                <!-- End Tab: Criminal Overview -->
-
-                <!-- Tab: Criminal Bail & Custody -->
-                <div id="tabCriminal_bail" class="tab-content hidden">
-                    <div class="result-card">
-                        <h3><i class="fas fa-key u-is-57"></i> 3-Tier Bail Viability Assessment</h3>
-                        <p class="card-subtitle">Evaluation under S.437/438/439 CrPC & S.480/483/484 BNSS with Satender Kumar Antil Guidelines</p>
-                        <div id="criminalBailAssessmentCard"></div>
-                    </div>
-                    <div class="result-card u-is-32">
-                        <h3><i class="fas fa-clock u-is-41"></i> Statutory Default Bail Countdown (S.167(2) CrPC / S.187 BNSS)</h3>
-                        <div id="criminalDefaultBailCard"></div>
-                    </div>
-                </div>
-                <!-- End Tab: Criminal Bail -->
-
-                <!-- Tab: Criminal Quashing Radar -->
-                <div id="tabCriminal_quashing" class="tab-content hidden">
-                    <div class="result-card">
-                        <h3><i class="fas fa-shield-halved u-is-22"></i> Bhajan Lal 7-Pillar Quashing Radar (S.482 CrPC / S.528 BNSS)</h3>
-                        <p class="card-subtitle">Scrutiny of FIR allegations against the landmark Supreme Court principles in State of Haryana v. Bhajan Lal</p>
-                        <div id="criminalBhajanLalList"></div>
-                    </div>
-                </div>
-                <!-- End Tab: Criminal Quashing -->
-
-                <!-- Tab: Criminal Forensics & Cross-Exam -->
-                <div id="tabCriminal_evidence" class="tab-content hidden">
-                    <div class="result-card">
-                        <h3><i class="fas fa-microscope u-is-58"></i> Evidentiary & Forensics Audit</h3>
-                        <div id="criminalEvidenceAuditList"></div>
-                    </div>
-                    <div class="result-card u-is-32">
-                        <h3><i class="fas fa-crosshairs u-is-21"></i> Investigating Officer (I.O.) & Witness Cross-Exam Kit</h3>
-                        <p class="card-subtitle">Generated cross-examination attack vectors to confront prosecution witnesses under S.145/148 Evidence Act / BSA</p>
-                        <div id="criminalCrossExamList"></div>
-                    </div>
-                </div>
-                <!-- End Tab: Criminal Evidence -->
+                
 
                 <!-- Action Buttons -->
                 <div class="results-actions">
@@ -2455,9 +2145,7 @@
                         </p>
                     </div>
                     <div class="u-is-135">
-                        <button class="btn btn-outline u-is-136" onclick="switchScreen('bankRecoveryScreen')">
-                            <i class="fas fa-building-columns"></i> <span>Open Bank Recovery OS</span>
-                        </button>
+                        
                         <button class="btn btn-outline u-is-137" onclick="openBulkBonusModal()">
                             <i class="fas fa-gift"></i> <span>Grant Bonus Credits</span>
                         </button>
@@ -2891,22 +2579,6 @@
 
                                 <div class="u-is-207">
                                     <div>
-                                        <div class="u-is-208">SARFAESI Act 2002 &amp; DRT Engine</div>
-                                        <div class="u-is-209">S.13(2) 60-day demand, S.13(4) possession, S.31(i) agri bar</div>
-                                    </div>
-                                    <span class="status-badge-active"><i class="fas fa-circle-check"></i> OPERATIONAL</span>
-                                </div>
-
-                                <div class="u-is-207">
-                                    <div>
-                                        <div class="u-is-208">Criminal Defense &amp; Satender Antil Matrix</div>
-                                        <div class="u-is-209">4-category bail rubric, S.482 quashing, trial cross-exam kit</div>
-                                    </div>
-                                    <span class="status-badge-active"><i class="fas fa-circle-check"></i> OPERATIONAL</span>
-                                </div>
-
-                                <div class="u-is-207">
-                                    <div>
                                         <div class="u-is-208">Live Statutory Verifiers (MCA21 &amp; Post)</div>
                                         <div class="u-is-209">Direct MCA corporate registry &amp; India Post Article tracking</div>
                                     </div>
@@ -3175,18 +2847,6 @@
                             <div class="u-is-250">
                                 <label class="u-is-251">
                                     <input type="checkbox" name="newLitigatorEngines" value="s138" checked> ⚖️ S.138 NI Act
-                                </label>
-                                <label class="u-is-251">
-                                    <input type="checkbox" name="newLitigatorEngines" value="sarfaesi" checked> 🏦 SARFAESI &amp; DRT
-                                </label>
-                                <label class="u-is-251">
-                                    <input type="checkbox" name="newLitigatorEngines" value="criminal" checked> 🏛️ Criminal (BNSS)
-                                </label>
-                                <label class="u-is-251">
-                                    <input type="checkbox" name="newLitigatorEngines" value="civil"> 📜 Civil (CPC)
-                                </label>
-                                <label class="u-is-251">
-                                    <input type="checkbox" name="newLitigatorEngines" value="bank_recovery"> 💼 Banking OS
                                 </label>
                                 <label class="u-is-251">
                                     <input type="checkbox" name="newLitigatorEngines" value="counsel_intel"> 🧠 Counsel Intel
@@ -3463,577 +3123,7 @@
 
 
 
-        <!-- ═══════════════════════════════════════════════════════════════ -->
-        <!-- BANKING & RECOVERY OS SECTION (INSTITUTIONAL VERTICAL) -->
-        <!-- ═══════════════════════════════════════════════════════════════ -->
-        <div id="bankRecoveryScreen" class="bank-screen hidden">
-            <!-- Top Institutional Ribbon -->
-            <div class="bank-portal-header">
-                <div class="bank-header-left">
-                    <div class="bank-logo-badge">
-                        <i class="fas fa-building-columns"></i>
-                    </div>
-                    <div>
-                        <div class="bank-portal-title">JUDIQ RECOVERY INTELLIGENCE OS</div>
-                        <div class="bank-portal-subtitle">Institutional Banking &amp; Stressed Asset Procedural Compliance Engine</div>
-                    </div>
-                </div>
-                <div class="bank-header-right u-is-1">
-                    <!-- Active Bank Officer Badge -->
-                    <div id="bankOfficerBadge" class="bank-officer-badge u-is-303">
-                        <i class="fas fa-user-check"></i>
-                        <span id="bankOfficerBadgeText">Authorized Bank Officer: State Bank of India</span>
-                    </div>
-                    <!-- Master Admin Badge (shown if admin) -->
-                    <div id="bankMasterAdminBadge" class="admin-master-badge u-is-68">
-                        <i class="fas fa-crown"></i> Master Admin Access
-                    </div>
-                    <button id="bankSwitchOfficerBtn" class="btn btn-sm btn-outline u-is-304" onclick="openBankAuthModal()">
-                        <i class="fas fa-user-plus"></i> <span>Officer Sign In / Register</span>
-                    </button>
-                    <button id="bankSignOutBtn" class="btn btn-sm btn-outline u-is-305" onclick="bankOfficerSignOut()">
-                        <i class="fas fa-arrow-right-from-bracket"></i> <span>Sign Out</span>
-                    </button>
-                    <button class="theme-toggle-btn u-is-306" title="Toggle Light/Dark Mode" onclick="toggleTheme()">
-                        <i class="fas fa-moon"></i>
-                    </button>
-                    <button class="btn btn-outline btn-sm u-is-307" onclick="switchScreen('landingScreen')">
-                        <i class="fas fa-arrow-left"></i> Return to Main Portal
-                    </button>
-                </div>
-            </div>
-
-            <!-- Unit & Scenario Quick Launcher Bar -->
-            <div class="bank-control-strip">
-                <div class="bank-unit-selector">
-                    <label><i class="fas fa-landmark"></i> Recovery Cell / Branch:</label>
-                    <select id="bankBranchName" class="bank-input-select" aria-label="Select Assigned Bank Branch" title="Select Assigned Bank Branch">
-                        <option value="State Bank of India — Stressed Asset Recovery Branch (SARB Mumbai)">State Bank of India — Stressed Asset Recovery Branch (SARB Mumbai)</option>
-                        <option value="Punjab National Bank — Large Corporate Recovery Division (Delhi)">Punjab National Bank — Large Corporate Recovery Division (Delhi)</option>
-                        <option value="HDFC Bank — Wholesale Recovery Dept (Mumbai)">HDFC Bank — Wholesale Recovery Dept (Mumbai)</option>
-                        <option value="Bank of Baroda — SAMB (Ahmedabad)">Bank of Baroda — SAMB (Ahmedabad)</option>
-                        <option value="ICICI Bank — Special Asset Management Group (Pune)">ICICI Bank — Special Asset Management Group (Pune)</option>
-                        <option value="State Bank of India — SAMB (New Delhi)">State Bank of India — SAMB (New Delhi)</option>
-                        <option value="Axis Bank — Stressed Assets Resolution Dept (Bangalore)">Axis Bank — Stressed Assets Resolution Dept (Bangalore)</option>
-                        <option value="Canara Bank — Recovery &amp; Legal Section (Hyderabad)">Canara Bank — Recovery &amp; Legal Section (Hyderabad)</option>
-                    </select>
-                </div>
-                <div class="bank-quick-scenarios">
-                    <button id="bankNewCaseBtn" class="btn btn-outline btn-sm u-is-308" onclick="resetToBlankCase()">
-                        <i class="fas fa-plus"></i> New Blank Case
-                    </button>
-                    <span class="preset-label"><i class="fas fa-folder-tree"></i> Institutional Portfolios:</span>
-                    <button id="bankLoadDemo85L" class="btn btn-primary btn-sm" title="Tier 1: 100% compliant S.138 default file">
-                        <i class="fas fa-circle-check"></i> Portfolio 1: ₹8.5L (Clean S.138)
-                    </button>
-                    <button id="bankLoadDemo14L" class="btn btn-outline btn-sm" title="Tier 2: Missing postal tracking report and 65B statement (Curable)">
-                        <i class="fas fa-wrench"></i> Portfolio 2: ₹14L (Proof of Service Gap)
-                    </button>
-                    <button id="bankLoadDemo25L" class="btn btn-outline btn-sm" title="Tier 3: Premature complaint filing u/s 138(c) (Fatal Yogendra Pratap Singh bar)">
-                        <i class="fas fa-triangle-exclamation"></i> Portfolio 3: ₹25L (Premature Filing Trap)
-                    </button>
-                    <button id="bankLoadDemo18Cr" class="btn btn-outline btn-sm" title="Tier 4: SARFAESI S.26D CERSAI missing & S.31(i) Agri land bar">
-                        <i class="fas fa-ban"></i> Portfolio 4: ₹1.8Cr (SARFAESI CERSAI Bar)
-                    </button>
-                    <button id="bankLoadDemo65L" class="btn btn-outline btn-sm" title="Tier 5: Delayed filing with S.142(1)(b) condonation affidavit">
-                        <i class="fas fa-file-signature"></i> Portfolio 5: ₹65L (S.142 Condonation)
-                    </button>
-                    <span id="bankAuditStatusBadge" class="bank-status-pill">
-                        <i class="fas fa-shield-halved"></i> Statutory Rule Engine Ready
-                    </span>
-                </div>
-            </div>
-
-            <!-- Executive Bank OS Function Navigation Strip -->
-            <div class="bank-function-tabs-strip">
-                <button class="bank-fn-tab active" id="bankTabBtnAudit" onclick="switchBankFunctionTab('audit')">
-                    <i class="fas fa-scale-balanced"></i> 1. Statutory Case Intake &amp; Audit
-                </button>
-                <button class="bank-fn-tab" id="bankTabBtnMultiTrack" onclick="switchBankFunctionTab('multiTrack')">
-                    <i class="fas fa-arrows-split-up-and-left"></i> 2. Multi-Track Statutory Orchestrator
-                </button>
-                <button class="bank-fn-tab" id="bankTabBtnDrafter" onclick="switchBankFunctionTab('drafter')">
-                    <i class="fas fa-file-contract"></i> 3. Statutory Legal Notice &amp; 65B Drafter
-                </button>
-                <button class="bank-fn-tab" id="bankTabBtnOTS" onclick="switchBankFunctionTab('ots')">
-                    <i class="fas fa-calculator"></i> 4. OTS vs Litigation NPV Optimizer
-                </button>
-                <button class="bank-fn-tab" id="bankTabBtnAdvocates" onclick="switchBankFunctionTab('advocates')">
-                    <i class="fas fa-user-tie"></i> 5. Empaneled Advocate SLA &amp; Dispatch
-                </button>
-                <button class="bank-fn-tab" id="bankTabBtnAnalytics" onclick="switchBankFunctionTab('analytics')">
-                    <i class="fas fa-chart-pie"></i> 6. Executive Portfolio Analytics
-                </button>
-                <button class="bank-fn-tab" id="bankTabBtnDeadlines" onclick="switchBankFunctionTab('deadlines')">
-                    <i class="fas fa-calendar-days"></i> 7. Statutory Deadline Calendar
-                </button>
-                <button class="bank-fn-tab" id="bankTabBtnCounselIntel" onclick="switchBankFunctionTab('counselIntel')">
-                    <i class="fas fa-shield-virus"></i> 8. Opposing Counsel Matchup
-                </button>
-            </div>
-
-            <!-- ================================================================= -->
-            <!-- VIEW 1: STATUTORY CASE INTAKE & AUDIT                             -->
-            <!-- ================================================================= -->
-            <div id="bankViewAudit" class="bank-function-view active">
-                <div class="bank-workspace-grid">
-                    <!-- LEFT COLUMN: Recovery Intake & Evidence Checklist -->
-                    <div class="bank-panel bank-intake-panel">
-                        <div class="bank-panel-header">
-                            <h4><i class="fas fa-folder-open"></i> Default Account &amp; Statutory Parameters</h4>
-                            <span class="badge-subtle">Deterministic Input</span>
-                        </div>
-
-                        <div class="bank-form-group">
-                            <label>Statutory Recovery Track / Case Type</label>
-                            <select id="bankCaseType" class="bank-input-select" aria-label="Select Recovery Case Type" title="Select Recovery Case Type">
-                                <option value="Cheque Bounce (S.138)">Section 138 Negotiable Instruments Act (Cheque Dishonour)</option>
-                                <option value="SARFAESI & Cheque Bounce Concurrent Recovery">SARFAESI S.13(2) + Section 138 Concurrent Enforcement</option>
-                                <option value="SARFAESI Act 2002 (Secured Recovery)">SARFAESI Act 2002 (Chapter III Security Enforcement)</option>
-                            </select>
-                        </div>
-
-                        <div class="bank-form-row">
-                            <div class="bank-form-group flex-2">
-                                <label>Borrower / Accused Entity Name</label>
-                                <input type="text" id="bankBorrowerName" class="bank-input-text" placeholder="e.g. Modern Infra &amp; Logistix Ltd" aria-label="E.G.  Modern  Infra &  Logistix  Ltd" title="E.G.  Modern  Infra &  Logistix  Ltd">
-                            </div>
-                            <div class="bank-form-group flex-1">
-                                <label>Loan Ref / Account No</label>
-                                <input type="text" id="bankLoanRefNo" class="bank-input-text" placeholder="e.g. SBI/SARB/MUM/2026/04918" aria-label="E.G.  S B I/ S A R B/ M U M/2026/04918" title="E.G.  S B I/ S A R B/ M U M/2026/04918">
-                            </div>
-                        </div>
-
-                        <div class="bank-form-row">
-                            <div class="bank-form-group">
-                                <label>Default Claim Amount (INR ₹)</label>
-                                <input type="number" id="bankDefaultAmount" class="bank-input-text" placeholder="e.g. 1500000" aria-label="E.G. 1500000" title="E.G. 1500000">
-                            </div>
-                            <div class="bank-form-group">
-                                <label>Cheque Issue Date</label>
-                                <input type="date" id="bankChequeDate" class="bank-input-text" aria-label="Cheque Presentation Date" title="Cheque Presentation Date">
-                            </div>
-                            <div class="bank-form-group">
-                                <label>Cheque Dishonour Date</label>
-                                <input type="date" id="bankDishonourDate" class="bank-input-text" aria-label="Bank Return Memo Date" title="Bank Return Memo Date">
-                            </div>
-                        </div>
-
-                        <div class="bank-form-row">
-                            <div class="bank-form-group">
-                                <label>Statutory Notice Date (S.138b)</label>
-                                <input type="date" id="bankNoticeDate" class="bank-input-text" aria-label="Statutory Demand Notice Dispatch Date" title="Statutory Demand Notice Dispatch Date">
-                            </div>
-                            <div class="bank-form-group">
-                                <label>Notice Delivery Date (Receipt)</label>
-                                <input type="date" id="bankDeliveryDate" class="bank-input-text" aria-label="Notice Delivery or Acknowledgment Date" title="Notice Delivery or Acknowledgment Date">
-                            </div>
-                            <div class="bank-form-group">
-                                <label>Complaint Filing Date (S.142)</label>
-                                <input type="date" id="bankComplaintDate" class="bank-input-text" aria-label="Criminal Complaint Filing Date" title="Criminal Complaint Filing Date">
-                            </div>
-                        </div>
-
-                        <!-- Special Legal Conditions -->
-                        <div class="bank-sub-card">
-                            <h5><i class="fas fa-scale-balanced"></i> Statutory Flags &amp; Collateral Status</h5>
-                            <div class="bank-checkbox-grid">
-                                <label class="bank-checkbox-label">
-                                    <input type="checkbox" id="bankCondonationAttached">
-                                    <span>S.142(1)(b) Condonation Attached</span>
-                                </label>
-                                <label class="bank-checkbox-label">
-                                    <input type="checkbox" id="bankIsSecured">
-                                    <span>Secured Asset Available</span>
-                                </label>
-                                <label class="bank-checkbox-label">
-                                    <input type="checkbox" id="bankCersaiRegistered" checked>
-                                    <span>CERSAI Registered (S.26D)</span>
-                                </label>
-                                <label class="bank-checkbox-label">
-                                    <input type="checkbox" id="bankIsAgriLand">
-                                    <span>Agricultural Land (S.31i Bar)</span>
-                                </label>
-                            </div>
-                        </div>
-
-                        <!-- Evidentiary Assets Checklist -->
-                        <div class="bank-sub-card">
-                            <h5><i class="fas fa-clipboard-check"></i> Evidentiary Assets &amp; Proof of Service</h5>
-                            <div class="bank-checkbox-grid">
-                                <label class="bank-checkbox-label">
-                                    <input type="checkbox" id="bankHasCheque" checked>
-                                    <span>Original Stamped Cheque</span>
-                                </label>
-                                <label class="bank-checkbox-label">
-                                    <input type="checkbox" id="bankHasMemo" checked>
-                                    <span>Bank Dishonour Memo</span>
-                                </label>
-                                <label class="bank-checkbox-label">
-                                    <input type="checkbox" id="bankHasSanction" checked>
-                                    <span>Stamped Sanction Letter</span>
-                                </label>
-                                <label class="bank-checkbox-label">
-                                    <input type="checkbox" id="bankHasPostalSlip" checked>
-                                    <span>Speed Post Consignment Receipt</span>
-                                </label>
-                                <label class="bank-checkbox-label">
-                                    <input type="checkbox" id="bankHasTracking" checked>
-                                    <span>India Post Delivery Report</span>
-                                </label>
-                                <label class="bank-checkbox-label">
-                                    <input type="checkbox" id="bankHasStatement" checked>
-                                    <span>Banker's Books 65B Statement</span>
-                                </label>
-                            </div>
-                        </div>
-
-                        <button id="bankRunAuditBtn" class="btn btn-primary btn-large btn-block u-is-32">
-                            <i class="fas fa-play"></i> Run Statutory Recovery Audit
-                        </button>
-                    </div>
-
-                    <!-- RIGHT COLUMN: Statutory Audit Output, Advocate Dossier & Compliance Ledger -->
-                    <div class="bank-panel bank-output-panel">
-                        <!-- Recovery Viability Score Banner -->
-                        <div class="bank-score-card">
-                            <div class="score-card-left">
-                                <div class="score-label">LEGAL RECOVERY READINESS SCORE</div>
-                                <div class="score-display">
-                                    <span id="bankScoreValue" class="score-number">--/100</span>
-                                    <div class="score-gauge-container">
-                                        <div id="bankScoreGauge" class="bank-gauge-fill u-is-309"></div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="score-card-right">
-                                <div id="bankVerdictBadge" class="bank-verdict-chip u-is-310">
-                                    <i class="fas fa-circle-info"></i> Ready for Statutory Audit
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Statutory Timeline Milestones -->
-                        <div class="bank-output-section">
-                            <h5><i class="fas fa-timeline"></i> Statutory Procedural Timeline &amp; Milestone Compliance</h5>
-                            <div id="bankMilestonesContainer" class="bank-milestones-grid">
-                                <p class="u-is-311">Select an institutional portfolio template above or enter dates to calculate statutory milestones.</p>
-                            </div>
-                        </div>
-
-                        <!-- Defect Classification & Remediation Guidance -->
-                        <div class="bank-output-section">
-                            <h5><i class="fas fa-triangle-exclamation"></i> Statutory Defect Audit &amp; Remediation Matrix</h5>
-                            <div id="bankDefectContainer">
-                                <p class="u-is-311">Run statutory audit to evaluate limitation, presentation, and service defects.</p>
-                            </div>
-                        </div>
-
-                        <!-- Empaneled Advocate Case Dossier -->
-                        <div class="bank-output-section">
-                            <div class="section-header-row">
-                                <h5><i class="fas fa-gavel"></i> Empaneled Advocate Case Dossier (Actionable Brief)</h5>
-                                <button id="bankCopyDossierBtn" class="btn btn-outline btn-xs">
-                                    <i class="fas fa-copy"></i> Copy Dossier
-                                </button>
-                            </div>
-                            <div id="bankDossierContent">
-                                <p class="u-is-311">Empaneled advocate brief will automatically populate upon statutory audit.</p>
-                            </div>
-                        </div>
-
-                        <!-- Regulatory Audit Trail / Compliance Evidence Ledger -->
-                        <div class="bank-output-section">
-                            <div class="section-header-row">
-                                <h5><i class="fas fa-stamp"></i> Regulatory Audit Trail / Compliance Evidence Ledger</h5>
-                                <button id="bankExportLedgerBtn" class="btn btn-outline btn-xs">
-                                    <i class="fas fa-download"></i> Download Audit Record (JSON)
-                                </button>
-                            </div>
-                            <div id="bankLedgerBox">
-                                <p class="u-is-311">Cryptographic compliance ledger record will generate upon statutory audit.</p>
-                            </div>
-                        </div>
-
-                        <!-- Final Action & Dispatch Bar -->
-                        <div class="bank-action-footer">
-                            <button id="bankDispatchBtn" class="btn btn-primary btn-large">
-                                <i class="fas fa-paper-plane"></i> Dispatch Dossier to Empaneled Advocate
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- ================================================================= -->
-            <!-- VIEW 2: MULTI-TRACK STATUTORY ORCHESTRATOR                        -->
-            <!-- ================================================================= -->
-            <div id="bankViewMultiTrack" class="bank-function-view">
-                <div class="bank-multi-track-header">
-                    <div>
-                        <h3><i class="fas fa-arrows-split-up-and-left"></i> Multi-Track Concurrent Recovery Strategy Engine</h3>
-                        <p>Simultaneously evaluate statutory viability, limitation periods, and jurisdictional precedence across 5 Indian legal recovery tracks.</p>
-                    </div>
-                    <button class="btn btn-primary" onclick="runMultiTrackEvaluation()">
-                        <i class="fas fa-bolt"></i> Evaluate Multi-Track Viability
-                    </button>
-                </div>
-
-                <div id="bankMultiTrackResultsContainer" class="bank-multitrack-grid">
-                    <div class="bank-card u-is-312">
-                        <i class="fas fa-network-wired u-is-313"></i>
-                        <h4>Awaiting Multi-Track Analysis</h4>
-                        <p class="u-is-314">Click 'Evaluate Multi-Track Viability' to calculate concurrent forum leverage across S.138, SARFAESI, DRT OA, IBC Insolvency, and RBI Wilful Defaulter tracks.</p>
-                        <button class="btn btn-primary" onclick="runMultiTrackEvaluation()">Run Multi-Track Strategy Audit</button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- ================================================================= -->
-            <!-- VIEW 3: STATUTORY LEGAL NOTICE & 65B DRAFTER                      -->
-            <!-- ================================================================= -->
-            <div id="bankViewDrafter" class="bank-function-view">
-                <div class="bank-drafter-grid">
-                    <!-- Left: Drafter Controls -->
-                    <div class="bank-panel">
-                        <div class="bank-panel-header">
-                            <h4><i class="fas fa-file-contract"></i> Statutory Document Generator</h4>
-                            <span class="badge-subtle">Court Admissible</span>
-                        </div>
-
-                        <div class="bank-form-group">
-                            <label>Target Legal Document / Notice Type</label>
-                            <select id="bankDraftDocType" class="bank-input-select" aria-label="Document Template Type" title="Document Template Type" onchange="updateDraftTypeFields()">
-                                <option value="S138_DEMAND_NOTICE">1. Statutory Demand Notice u/s 138(b) NI Act (15-Day Cure)</option>
-                                <option value="SARFAESI_13_2_NOTICE">2. SARFAESI S.13(2) Demand Notice (60-Day Schedule)</option>
-                                <option value="SECTION_65B_CERTIFICATE">3. Section 65B Evidence Act / S.63 BSA Computerized Statement Certificate</option>
-                                <option value="S142_CONDONATION_PETITION">4. S.142(1)(b) Condonation of Delay Application &amp; Affidavit</option>
-                                <option value="S143A_INTERIM_COMPENSATION">5. Section 143A Petition (20% Interim Compensation)</option>
-                            </select>
-                        </div>
-
-                        <div class="bank-form-row">
-                            <div class="bank-form-group">
-                                <label>Cheque / Instrument No</label>
-                                <input type="text" id="bankDraftChequeNo" class="bank-input-text" aria-label="Cheque Number" title="Cheque Number" placeholder="490182" value="490182">
-                            </div>
-                            <div class="bank-form-group">
-                                <label>Delay Days (for S.142)</label>
-                                <input type="number" id="bankDraftDelayDays" class="bank-input-text" aria-label="Delay in Filing (Days)" title="Delay in Filing (Days)" placeholder="18" value="18">
-                            </div>
-                        </div>
-
-                        <div class="bank-form-group">
-                            <label for="bankDraftPropertyDesc">Property / Collateral Description (SARFAESI)</label>
-                            <input type="text" id="bankDraftPropertyDesc" class="bank-input-text" aria-label="Property / Collateral Description (SARFAESI)" title="Property / Collateral Description" placeholder="Commercial Unit No. 402, 4th Floor, Apex Business Center, MIDC Area" value="Commercial Unit No. 402, 4th Floor, Apex Business Center, MIDC Area">
-                        </div>
-
-                        <div class="bank-form-group">
-                            <label for="bankDraftDelayReason">Delay Justification Cause (S.142 Affidavit)</label>
-                            <textarea id="bankDraftDelayReason" class="bank-input-text u-is-315" rows="2" aria-label="Delay Justification Cause (S.142 Affidavit)" title="Delay Justification Cause" placeholder="Administrative processing delays during branch asset reconstruction...">Administrative processing delays during branch asset reconstruction and legal vetting.</textarea>
-                        </div>
-
-                        <button class="btn btn-primary btn-large btn-block" onclick="generateStatutoryLegalDraft()">
-                            <i class="fas fa-pen-nib"></i> Generate Court-Admissible Draft
-                        </button>
-                    </div>
-
-                    <!-- Right: Document Preview & Export -->
-                    <div class="bank-panel">
-                        <div class="bank-panel-header u-is-316">
-                            <h4><i class="fas fa-file-lines"></i> Document Preview &amp; Verification</h4>
-                            <div class="u-is-106">
-                                <button class="btn btn-outline btn-xs" onclick="copyStatutoryDraft()">
-                                    <i class="fas fa-copy"></i> Copy Text
-                                </button>
-                                <button class="btn btn-primary btn-xs" onclick="downloadStatutoryDraft()">
-                                    <i class="fas fa-download"></i> Download Draft
-                                </button>
-                            </div>
-                        </div>
-                        <div id="bankDraftPreviewBox" class="bank-legal-draft-box">
-                            <p class="u-is-317">Select a document type on the left and click 'Generate Court-Admissible Draft' to preview and export.</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- ================================================================= -->
-            <!-- VIEW 4: OTS (ONE-TIME SETTLEMENT) VS LITIGATION OPTIMIZER         -->
-            <!-- ================================================================= -->
-            <div id="bankViewOTS" class="bank-function-view">
-                <div class="bank-ots-grid">
-                    <!-- Left: Parameters -->
-                    <div class="bank-panel">
-                        <div class="bank-panel-header">
-                            <h4><i class="fas fa-calculator"></i> OTS vs Litigation Financial Parameters</h4>
-                            <span class="badge-subtle">NPV &amp; Capital Provisioning</span>
-                        </div>
-
-                        <div class="bank-form-row">
-                            <div class="bank-form-group">
-                                <label>Principal Ledger Outstanding (₹)</label>
-                                <input type="number" id="bankOtsPrincipal" class="bank-input-text" aria-label="Principal Outstanding Balance (₹)" title="Principal Outstanding Balance (₹)" placeholder="5000000" value="5000000">
-                            </div>
-                            <div class="bank-form-group">
-                                <label>Total Dues with Interest (₹)</label>
-                                <input type="number" id="bankOtsTotalDues" class="bank-input-text" aria-label="Total Ledger Dues with Interest (₹)" title="Total Ledger Dues with Interest (₹)" placeholder="6500000" value="6500000">
-                            </div>
-                        </div>
-
-                        <div class="bank-form-row">
-                            <div class="bank-form-group">
-                                <label>Borrower OTS Offer Amount (₹)</label>
-                                <input type="number" id="bankOtsOfferAmt" class="bank-input-text" aria-label="Borrower Settlement / OTS Offer Amount (₹)" title="Borrower Settlement / OTS Offer Amount (₹)" placeholder="5200000" value="5200000">
-                            </div>
-                            <div class="bank-form-group">
-                                <label>Litigation Duration (Months)</label>
-                                <select id="bankOtsLitMonths" class="bank-input-select" aria-label="Estimated Remaining Litigation Duration" title="Estimated Remaining Litigation Duration">
-                                    <option value="12">12 Months (Fast-Track JMFC/DRT)</option>
-                                    <option value="24" selected>24 Months (Standard Contested)</option>
-                                    <option value="36">36 Months (Complex High-Court Appeals)</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <div class="bank-form-row">
-                            <div class="bank-form-group">
-                                <label>Estimated Legal &amp; Court Fees (₹)</label>
-                                <input type="number" id="bankOtsLegalCosts" class="bank-input-text" aria-label="Projected Legal & Enforcement Costs (₹)" title="Projected Legal & Enforcement Costs (₹)" placeholder="250000" value="250000">
-                            </div>
-                            <div class="bank-form-group">
-                                <label>Litigation Recovery Probability (%)</label>
-                                <input type="number" id="bankOtsProb" class="bank-input-text" aria-label="Estimated Courtroom Recovery Probability (%)" title="Estimated Courtroom Recovery Probability (%)" placeholder="75" value="75" min="10" max="100">
-                            </div>
-                        </div>
-
-                        <div class="bank-form-row">
-                            <div class="bank-form-group">
-                                <label>Bank Cost of Capital (Discount %)</label>
-                                <input type="number" id="bankOtsDiscount" class="bank-input-text" aria-label="Bank Cost of Capital / Discount Rate (%)" title="Bank Cost of Capital / Discount Rate (%)" placeholder="9" value="9" step="0.5">
-                            </div>
-                            <div class="bank-form-group">
-                                <label>NPA Classification Age (Years)</label>
-                                <input type="number" id="bankOtsNpaAge" class="bank-input-text" aria-label="Asset NPA Vintage (Years)" title="Asset NPA Vintage (Years)" placeholder="2.5" value="2.5" step="0.5">
-                            </div>
-                        </div>
-
-                        <button class="btn btn-primary btn-large btn-block" onclick="runOtsNpvOptimization()">
-                            <i class="fas fa-chart-line"></i> Calculate OTS vs Litigation NPV
-                        </button>
-                    </div>
-
-                    <!-- Right: NPV Results & Decision Matrix -->
-                    <div class="bank-panel">
-                        <div class="bank-panel-header">
-                            <h4><i class="fas fa-scale-balanced"></i> Financial Recommendation &amp; Time Decay</h4>
-                            <span id="bankOtsVerdictBadge" class="bank-verdict-chip u-is-318">Awaiting Calculation</span>
-                        </div>
-                        <div id="bankOtsResultsBox">
-                            <p class="u-is-317">Adjust financial inputs on the left and calculate NPV to compare immediate OTS realization vs time-discounted litigation yield.</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- ================================================================= -->
-            <!-- VIEW 5: EMPANELED ADVOCATE SLA & DISPATCH HUB                     -->
-            <!-- ================================================================= -->
-            <div id="bankViewAdvocates" class="bank-function-view">
-                <div class="bank-multi-track-header">
-                    <div>
-                        <h3><i class="fas fa-user-tie"></i> Empaneled Legal Counsel Directory &amp; SLA Registry</h3>
-                        <p>Track advocate performance, High Court &amp; DRT win rates, filing turnaround SLAs, fee schedules, and dispatch actionable recovery briefs.</p>
-                    </div>
-                    <button class="btn btn-primary" onclick="loadEmpaneledAdvocatesUI()">
-                        <i class="fas fa-rotate"></i> Refresh Counsel Registry
-                    </button>
-                </div>
-
-                <div id="bankAdvocatesGridContainer" class="bank-advocates-cards-grid">
-                    <!-- Loaded dynamically by bank_recovery.js -->
-                </div>
-            </div>
-
-            <!-- ================================================================= -->
-            <!-- VIEW 6: EXECUTIVE PORTFOLIO ANALYTICS                             -->
-            <!-- ================================================================= -->
-            <div id="bankViewAnalytics" class="bank-function-view">
-                <div class="bank-multi-track-header">
-                    <div>
-                        <h3><i class="fas fa-chart-pie"></i> Executive Banking &amp; Portfolio Intelligence</h3>
-                        <p>Real-time analytics on 5-tier portfolio risk distributions, longitudinal compliance index trends, court benchmarks, and statutory recovery conversion rates.</p>
-                    </div>
-                    <button class="btn btn-primary" onclick="loadAnalyticsDashboardUI()">
-                        <i class="fas fa-rotate"></i> Refresh Portfolio Metrics
-                    </button>
-                </div>
-                <div class="u-is-319" id="bankAnalyticsContainer">
-                    <!-- Loaded dynamically by enterprise_features.js -->
-                </div>
-            </div>
-
-            <!-- ================================================================= -->
-            <!-- VIEW 7: STATUTORY LIMITATION & CALENDAR SYNC                      -->
-            <!-- ================================================================= -->
-            <div id="bankViewDeadlines" class="bank-function-view">
-                <div class="bank-multi-track-header">
-                    <div>
-                        <h3><i class="fas fa-calendar-days"></i> Statutory Limitation Tracker &amp; Smart Alerts</h3>
-                        <p>Calculate Section 138, SARFAESI, and DRT filing deadlines with court holiday logic and 1-click sync to Google Calendar, Outlook, or Apple Calendar.</p>
-                    </div>
-                    <button class="btn btn-primary" onclick="loadDeadlinesCalendarUI()">
-                        <i class="fas fa-arrows-rotate"></i> Recalculate Limitation
-                    </button>
-                </div>
-                <div class="u-is-319" id="bankDeadlinesContainer">
-                    <!-- Loaded dynamically by enterprise_features.js -->
-                </div>
-            </div>
-
-            <!-- ================================================================= -->
-            <!-- VIEW 8: OPPOSING DEFENSE COUNSEL MATCHUP ANALYZER                 -->
-            <!-- ================================================================= -->
-            <div id="bankViewCounselIntel" class="bank-function-view">
-                <div class="bank-multi-track-header">
-                    <div>
-                        <h3><i class="fas fa-shield-virus"></i> Opposing Defense Counsel Matchup Simulation</h3>
-                        <p>Simulate courtroom encounters against opposing defense strategies, predict primary defense arguments, and generate precedent-backed prosecution counter-tactics.</p>
-                    </div>
-                    <div class="u-is-106">
-                        <input type="text" id="counselSearchInput" placeholder="Search strategy or court..." class="bank-input-text u-is-320" oninput="loadOpposingCounselDirectory(this.value)" aria-label="Search Strategy Or Court..." title="Search Strategy Or Court...">
-                        <button class="btn btn-primary" onclick="loadOpposingCounselDirectory()">
-                            <i class="fas fa-search"></i> Search
-                        </button>
-                    </div>
-                </div>
-                
-                <div class="u-is-321">
-                    <div>
-                        <h4 class="u-is-322">
-                            <i class="fas fa-address-book u-is-323"></i> Community Verified Defense Strategies
-                        </h4>
-                        <div id="opposingCounselList">
-                            <!-- Loaded dynamically by counsel_intel.js -->
-                        </div>
-                    </div>
-                    <div>
-                        <h4 class="u-is-322">
-                            <i class="fas fa-crosshairs u-is-21"></i> Live Matchup Tactical Roadmap
-                        </h4>
-                        <div id="counselMatchupResultBox">
-                            <div class="bank-card u-is-324">
-                                <i class="fas fa-chess u-is-325"></i>
-                                <p class="u-is-326">Click "Analyze Matchup" on any defense profile to generate tactical prosecution counter-roadmaps.</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
         </div>
-
-    </div>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- LEGAL MODALS -->
@@ -4387,7 +3477,7 @@
         <div class="command-palette">
             <div class="command-input-wrapper">
                 <i class="fas fa-search"></i>
-                <input type="text" id="commandPaletteInput" class="command-input" placeholder="Type a command or search feature... (e.g. s138, sarfaesi, demo, pdf, theme)" oninput="filterCommandPalette(this.value)" aria-label="Type A Command Or Search Feature... (E.G. S138, Sarfaesi, Demo, Pdf, Theme)" title="Type A Command Or Search Feature... (E.G. S138, Sarfaesi, Demo, Pdf, Theme)">
+                <input type="text" id="commandPaletteInput" class="command-input" placeholder="Type a command or search feature... (e.g. s138, demo, notice, draft, theme)" oninput="filterCommandPalette(this.value)" aria-label="Type A Command Or Search Feature... (E.G. S138, Demo, Notice, Draft, Theme)" title="Type A Command Or Search Feature... (E.G. S138, Demo, Notice, Draft, Theme)">
                 <span class="command-shortcut-hint">ESC to close</span>
             </div>
             <div id="commandListContainer" class="command-list">
@@ -4421,16 +3511,7 @@
                     </div>
                     <span class="command-shortcut-hint">Demo</span>
                 </div>
-                <div class="command-item" onclick="executeCommand('demo_sarfaesi')">
-                    <div class="command-item-left">
-                        <div class="command-item-icon"><i class="fas fa-building-columns"></i></div>
-                        <div>
-                            <div class="command-item-title">Load SARFAESI DRT Recovery Demo Case</div>
-                            <div class="command-item-desc">Simulate Section 13(2) & 13(4) statutory NPA enforcement audit</div>
-                        </div>
-                    </div>
-                    <span class="command-shortcut-hint">Demo</span>
-                </div>
+                
                 <div class="command-item" onclick="executeCommand('demo_s141')">
                     <div class="command-item-left">
                         <div class="command-item-icon"><i class="fas fa-users-gear"></i></div>
@@ -4451,16 +3532,7 @@
                     </div>
                     <span class="command-shortcut-hint">Wizard</span>
                 </div>
-                <div class="command-item" onclick="executeCommand('new_sarfaesi')">
-                    <div class="command-item-left">
-                        <div class="command-item-icon"><i class="fas fa-shield-halved"></i></div>
-                        <div>
-                            <div class="command-item-title">Start New SARFAESI DRT Audit</div>
-                            <div class="command-item-desc">Analyze NPA classification, symbolic possession, and DRT Section 17 appeal deadlines</div>
-                        </div>
-                    </div>
-                    <span class="command-shortcut-hint">Wizard</span>
-                </div>
+                
                 <div class="command-item" onclick="executeCommand('print_memo')">
                     <div class="command-item-left">
                         <div class="command-item-icon"><i class="fas fa-print"></i></div>
@@ -4486,7 +3558,7 @@
                         <div class="command-item-icon"><i class="fas fa-book-bookmark"></i></div>
                         <div>
                             <div class="command-item-title">Search Supreme Court Precedents</div>
-                            <div class="command-item-desc">Query landmark S.138 & SARFAESI case law database</div>
+                            <div class="command-item-desc">Query landmark Section 138 case law database</div>
                         </div>
                     </div>
                     <span class="command-shortcut-hint">Precedents</span>
@@ -4521,270 +3593,6 @@
                     </div>
                     <span class="command-shortcut-hint">i18n</span>
                 </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- ═══════════════════════════════════════════════════════════════ -->
-    <!-- BANK OFFICER AUTHENTICATION & REGISTRATION MODAL -->
-    <!-- ═══════════════════════════════════════════════════════════════ -->
-    <div id="bankAuthModal" class="modal-overlay hidden u-is-237">
-        <div class="modal-container u-is-353">
-            <div class="modal-header u-is-354">
-                <div class="u-is-240">
-                    <div class="u-is-355">
-                        <i class="fas fa-building-columns"></i>
-                    </div>
-                    <div>
-                        <h3 class="u-is-242">Bank Recovery Portal Access</h3>
-                        <p class="u-is-356">Institutional credentials with mandatory @*.bank.com verification</p>
-                    </div>
-                </div>
-                <button class="u-is-244" onclick="closeBankAuthModal()">&times;</button>
-            </div>
-
-            <!-- Modal Nav Tabs -->
-            <div class="u-is-357">
-                <button id="bankAuthTabLoginBtn" type="button" class="btn btn-sm u-is-358" onclick="switchBankAuthTab('login')">
-                    <i class="fas fa-right-to-bracket"></i> Officer Sign In
-                </button>
-                <button id="bankAuthTabRegisterBtn" type="button" class="btn btn-sm u-is-359" onclick="switchBankAuthTab('register')">
-                    <i class="fas fa-user-plus"></i> Register Bank / Officer
-                </button>
-            </div>
-            
-            <div class="modal-body u-is-360">
-                
-                <!-- TAB 1: SIGN IN -->
-                <div id="bankAuthTabLogin">
-                    <!-- Quick Institutional Branch Profiles -->
-                    <label class="u-is-361">
-                        <i class="fas fa-bolt u-is-41"></i> Quick National Bank Branch Profiles:
-                    </label>
-                    <div class="u-is-362">
-                        <button type="button" class="btn btn-outline btn-sm u-is-363" onclick="selectBankPreset('SBI_SARB_MUM')">
-                            <i class="fas fa-landmark u-is-364"></i>
-                            <div><strong>SBI SARB Mumbai</strong><div class="u-is-365">OFFICER_SARB_842</div></div>
-                        </button>
-                        <button type="button" class="btn btn-outline btn-sm u-is-363" onclick="selectBankPreset('PNB_CFS_DEL')">
-                            <i class="fas fa-landmark u-is-41"></i>
-                            <div><strong>PNB CFS Delhi</strong><div class="u-is-365">OFFICER_DEL_LCR_419</div></div>
-                        </button>
-                        <button type="button" class="btn btn-outline btn-sm u-is-363" onclick="selectBankPreset('HDFC_WLR_MUM')">
-                            <i class="fas fa-landmark u-is-234"></i>
-                            <div><strong>HDFC Wholesale</strong><div class="u-is-365">OFFICER_MUM_WLR_302</div></div>
-                        </button>
-                        <button type="button" class="btn btn-outline btn-sm u-is-363" onclick="selectBankPreset('BOB_SAMB_AHM')">
-                            <i class="fas fa-landmark u-is-22"></i>
-                            <div><strong>BOB SAMB Ahmedabad</strong><div class="u-is-365">OFFICER_PUN_SAMB_512</div></div>
-                        </button>
-                    </div>
-
-                    <div class="u-is-366">
-                        <div class="u-is-367"></div>
-                        <span class="u-is-368">Or Enter Officer Credentials</span>
-                        <div class="u-is-367"></div>
-                    </div>
-
-                    <form id="bankAuthForm" onsubmit="submitBankLogin(event)">
-                        <div class="u-is-369">
-                            <div>
-                                <label class="u-is-370">Officer ID / Code *</label>
-                                <input type="text" id="bankAuthOfficerId" required class="bank-input-text u-is-247" placeholder="e.g. OFFICER_SARB_842" aria-label="E.G.  O F F I C E R  S A R B 842" title="E.G.  O F F I C E R  S A R B 842">
-                            </div>
-                            <div>
-                                <label class="u-is-370">Officer Full Name</label>
-                                <input type="text" id="bankAuthOfficerName" class="bank-input-text u-is-247" placeholder="e.g. Rajesh Nambiar" aria-label="E.G.  Rajesh  Nambiar" title="E.G.  Rajesh  Nambiar">
-                            </div>
-                        </div>
-
-                        <div class="u-is-371">
-                            <label class="u-is-370">Bank / Financial Institution</label>
-                            <input type="text" id="bankAuthBankName" class="bank-input-text u-is-247" placeholder="e.g. State Bank of India" value="State Bank of India" aria-label="E.G.  State  Bank Of  India" title="E.G.  State  Bank Of  India">
-                        </div>
-
-                        <div class="u-is-371">
-                            <label class="u-is-370">Recovery Branch / Unit Designation</label>
-                            <input type="text" id="bankAuthBranchName" class="bank-input-text u-is-247" placeholder="e.g. SBI — Stressed Asset Recovery Branch (SARB Mumbai)" value="State Bank of India — Stressed Asset Recovery Branch (SARB Mumbai)" aria-label="E.G.  S B I —  Stressed  Asset  Recovery  Branch ( S A R B  Mumbai)" title="E.G.  S B I —  Stressed  Asset  Recovery  Branch ( S A R B  Mumbai)">
-                        </div>
-
-                        <div class="u-is-372">
-                            <div>
-                                <label class="u-is-370">Official Bank Email</label>
-                                <input type="email" id="bankAuthEmail" class="bank-input-text u-is-247" placeholder="e.g. officer@sbi.co.in" oninput="checkBankEmailDomain(this, 'loginEmailDomainFeedback')" aria-label="E.G. Officer@Sbi.Co.In" title="E.G. Officer@Sbi.Co.In">
-                                <div class="u-is-373" id="loginEmailDomainFeedback"></div>
-                            </div>
-                            <div>
-                                <label class="u-is-370">Access Passcode / PIN</label>
-                                <input type="password" id="bankAuthPin" class="bank-input-text u-is-247" placeholder="••••••••" aria-label="••••••••" title="••••••••">
-                            </div>
-                        </div>
-
-                        <div class="u-is-316">
-                            <span class="u-is-374">
-                                Need an account? <a class="u-is-375" href="javascript:void(0)" onclick="switchBankAuthTab('register')">Register Bank Unit</a>
-                            </span>
-                            <div class="u-is-236">
-                                <button type="button" class="btn btn-outline" onclick="closeBankAuthModal()">Cancel</button>
-                                <button type="submit" class="btn btn-primary u-is-376">
-                                    <i class="fas fa-shield-check"></i> Sign In to Recovery OS
-                                </button>
-                            </div>
-                        </div>
-                    </form>
-                </div>
-
-                <!-- TAB 2: REGISTER NEW BANK / RECOVERY UNIT -->
-                <div id="bankAuthTabRegister" class="hidden">
-                    <div class="u-is-377">
-                        <i class="fas fa-shield-halved u-is-378"></i>
-                        <span><strong>Compulsory Bank Domain:</strong> Registration requires an authorized institutional bank email (e.g., <code>@sbi.co.in</code>, <code>@hdfcbank.com</code>, <code>@icicibank.com</code>, <code>@*.bank.com</code>).</span>
-                    </div>
-
-                    <form id="bankRegisterForm" onsubmit="submitBankRegister(event)">
-                        <div class="u-is-369">
-                            <div>
-                                <label class="u-is-370">Bank / Entity Name *</label>
-                                <input type="text" id="regBankName" required class="bank-input-text u-is-247" placeholder="e.g. ICICI Bank Ltd" aria-label="E.G.  I C I C I  Bank  Ltd" title="E.G.  I C I C I  Bank  Ltd">
-                            </div>
-                            <div>
-                                <label class="u-is-370">Branch IFSC / Code</label>
-                                <input type="text" id="regBankIfsc" class="bank-input-text u-is-247" placeholder="e.g. ICIC0000104" aria-label="E.G.  I C I C0000104" title="E.G.  I C I C0000104">
-                            </div>
-                        </div>
-
-                        <div class="u-is-371">
-                            <label class="u-is-370">Recovery Unit / Branch Designation *</label>
-                            <input type="text" id="regBankBranchName" required class="bank-input-text u-is-247" placeholder="e.g. ICICI Bank — Special Asset Management Group (Pune)" aria-label="E.G.  I C I C I  Bank —  Special  Asset  Management  Group ( Pune)" title="E.G.  I C I C I  Bank —  Special  Asset  Management  Group ( Pune)">
-                        </div>
-
-                        <div class="u-is-369">
-                            <div>
-                                <label class="u-is-370">Officer ID / Employee Code *</label>
-                                <input type="text" id="regBankOfficerId" required class="bank-input-text u-is-247" placeholder="e.g. OFFICER_ICICI_REC_701" aria-label="E.G.  O F F I C E R  I C I C I  R E C 701" title="E.G.  O F F I C E R  I C I C I  R E C 701">
-                            </div>
-                            <div>
-                                <label class="u-is-370">Officer Full Name *</label>
-                                <input type="text" id="regBankOfficerName" required class="bank-input-text u-is-247" placeholder="e.g. Meera Sunder" aria-label="E.G.  Meera  Sunder" title="E.G.  Meera  Sunder">
-                            </div>
-                        </div>
-
-                        <div class="u-is-379">
-                            <div>
-                                <label class="u-is-370">
-                                    Official Bank Email * <span class="u-is-380">(@*.bank.com / @*.co.in)</span>
-                                </label>
-                                <input type="email" id="regBankEmail" required class="bank-input-text u-is-247" placeholder="e.g. meera.s@icicibank.com" oninput="checkBankEmailDomain(this, 'regEmailDomainFeedback')" aria-label="E.G. Meera.S@Icicibank.Com" title="E.G. Meera.S@Icicibank.Com">
-                                <div class="u-is-373" id="regEmailDomainFeedback"></div>
-                            </div>
-                            <div>
-                                <label class="u-is-370">Recovery Role</label>
-                                <select id="regBankRole" class="bank-input-select u-is-247" aria-label="Assigned Bank Officer Role" title="Assigned Bank Officer Role">
-                                    <option value="bank_officer">Bank Legal Officer</option>
-                                    <option value="sarb_manager">SARB Branch Manager</option>
-                                    <option value="recovery_head">Recovery Vertical Head</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <div class="u-is-372">
-                            <div>
-                                <label class="u-is-370">Create Access Password / PIN *</label>
-                                <input type="password" id="regBankPassword" required minlength="4" class="bank-input-text u-is-247" placeholder="••••••••" aria-label="••••••••" title="••••••••">
-                            </div>
-                            <div>
-                                <label class="u-is-370">Confirm Access Password *</label>
-                                <input type="password" id="regBankPasswordConfirm" required minlength="4" class="bank-input-text u-is-247" placeholder="••••••••" aria-label="••••••••" title="••••••••">
-                            </div>
-                        </div>
-
-                        <div class="u-is-316">
-                            <span class="u-is-374">
-                                Already registered? <a class="u-is-375" href="javascript:void(0)" onclick="switchBankAuthTab('login')">Sign In</a>
-                            </span>
-                            <div class="u-is-236">
-                                <button type="button" class="btn btn-outline" onclick="closeBankAuthModal()">Cancel</button>
-                                <button type="submit" class="btn btn-primary u-is-376">
-                                    <i class="fas fa-building-circle-check"></i> Complete Bank Registration
-                                </button>
-                            </div>
-                        </div>
-                    </form>
-                </div>
-
-            </div>
-        </div>
-    </div>
-
-    <!-- ═══════════════════════════════════════════════════════════════ -->
-    <!-- PROVISION NEW BANK OFFICER MODAL (ADMIN CONTROL CENTER) -->
-    <!-- ═══════════════════════════════════════════════════════════════ -->
-    <div id="createBankOfficerModal" class="modal-overlay hidden u-is-237">
-        <div class="modal-container u-is-381">
-            <div class="modal-header u-is-382">
-                <div class="u-is-240">
-                    <div class="u-is-355">
-                        <i class="fas fa-user-plus"></i>
-                    </div>
-                    <div>
-                        <h3 class="u-is-242">Provision Bank Branch Officer</h3>
-                        <p class="u-is-383">Allocate recovery audit allowances for partner financial institutions</p>
-                    </div>
-                </div>
-                <button class="u-is-244" onclick="closeCreateBankOfficerModal()">&times;</button>
-            </div>
-            
-            <div class="modal-body u-is-245">
-                <form id="createBankOfficerForm" onsubmit="submitCreateBankOfficer(event)">
-                    <div class="u-is-369">
-                        <div>
-                            <label class="u-is-370">Officer ID / Code *</label>
-                            <input type="text" id="newBankOfficerId" required class="bank-input-text u-is-247" placeholder="e.g. OFFICER_ICICI_REC_101" aria-label="E.G.  O F F I C E R  I C I C I  R E C 101" title="E.G.  O F F I C E R  I C I C I  R E C 101">
-                        </div>
-                        <div>
-                            <label class="u-is-370">Officer Full Name *</label>
-                            <input type="text" id="newBankOfficerName" required class="bank-input-text u-is-247" placeholder="e.g. Meera Sunder" aria-label="E.G.  Meera  Sunder" title="E.G.  Meera  Sunder">
-                        </div>
-                    </div>
-
-                    <div class="u-is-369">
-                        <div>
-                            <label class="u-is-370">Bank / Institution *</label>
-                            <input type="text" id="newBankName" required class="bank-input-text u-is-247" placeholder="e.g. ICICI Bank" aria-label="E.G.  I C I C I  Bank" title="E.G.  I C I C I  Bank">
-                        </div>
-                        <div>
-                            <label class="u-is-370">Role Designation</label>
-                            <select id="newBankRole" class="bank-input-select u-is-247" aria-label="Designated Bank Officer Role" title="Designated Bank Officer Role">
-                                <option value="bank_officer">Bank Officer (Legal)</option>
-                                <option value="sarb_manager">SARB Branch Manager</option>
-                                <option value="recovery_head">Recovery Vertical Head</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="u-is-371">
-                        <label class="u-is-370">Branch / Recovery Cell Name *</label>
-                        <input type="text" id="newBankBranchName" required class="bank-input-text u-is-247" placeholder="e.g. ICICI Bank — Special Asset Management Cell (Pune)" aria-label="E.G.  I C I C I  Bank —  Special  Asset  Management  Cell ( Pune)" title="E.G.  I C I C I  Bank —  Special  Asset  Management  Cell ( Pune)">
-                    </div>
-
-                    <div class="u-is-372">
-                        <div>
-                            <label class="u-is-370">Official Email *</label>
-                            <input type="email" id="newBankEmail" required class="bank-input-text u-is-247" placeholder="e.g. meera.s@icicibank.com" aria-label="E.G. Meera.S@Icicibank.Com" title="E.G. Meera.S@Icicibank.Com">
-                        </div>
-                        <div>
-                            <label class="u-is-370">Monthly Audit Quota</label>
-                            <input type="number" id="newBankLimit" class="bank-input-text u-is-247" aria-label="Monthly Case Processing Quota" title="Monthly Case Processing Quota" placeholder="100" value="100">
-                        </div>
-                    </div>
-
-                    <div class="u-is-217">
-                        <button type="button" class="btn btn-outline" onclick="closeCreateBankOfficerModal()">Cancel</button>
-                        <button type="submit" class="btn btn-primary u-is-384">
-                            <i class="fas fa-plus"></i> Create Officer Account
-                        </button>
-                    </div>
-                </form>
             </div>
         </div>
     </div>
@@ -4883,10 +3691,7 @@
                 <p>
                     The platform provides analytical evaluation across specialized Indian statutory domains including:
                     <ul>
-                        <li><strong>Section 138/141/142 Negotiable Instruments Act, 1881:</strong> Limitation computing, cheque dishonour tracking, and statutory notice verification.</li>
-                        <li><strong>SARFAESI Act, 2002 & DRT Framework:</strong> Section 13(2), 13(4) statutory notices, DM/CMM Section 14 petition auditing, and OTS evaluation.</li>
-                        <li><strong>Criminal Litigation (BNS 2023 / IPC & BNSS 2023 / CrPC):</strong> Bail viability, Bhajan Lal quashing grounds, and Section 65B BSA electronic evidence verification.</li>
-                        <li><strong>Commercial & Civil Litigation (CPC 1908):</strong> Order XXXVII summary suits, Order VII Rule 11 rejection of plaints, and pre-institution mediation audits.</li>
+                        <li><strong>Section 138/141/142 Negotiable Instruments Act, 1881:</strong> Limitation computing, cheque dishonour tracking, statutory notice verification, director vicarious liability, and Section 143A interim compensation modeling.</li>
                     </ul>
                 </p>
 
@@ -4902,7 +3707,7 @@
 
                 <h4 class="u-is-411">5. Subscription Plans, Pricing & Fair Use Quotas</h4>
                 <p>
-                    Modular subscriptions (S.138 Engine, SARFAESI Engine, Criminal Intelligence, Banking OS) are billed on a recurring monthly/annual basis in INR (₹). Quotas reset on a 30-day billing cycle. Custom plan alterations are subject to administrative review and approval.
+                    Subscriptions for the Section 138 Litigation Intelligence platform are billed on a recurring monthly/annual basis in INR (₹). Quotas reset on a 30-day billing cycle. Custom plan alterations are subject to administrative review and approval.
                 </p>
 
                 <h4 class="u-is-411">6. Limitation of Liability</h4>
@@ -4958,7 +3763,7 @@
                     <div class="domain-action-card" onclick="showCaseList()">
                         <div class="dac-icon u-is-234"><i class="fas fa-folder-open"></i></div>
                         <div class="dac-title">Active Litigation Dossiers</div>
-                        <div class="dac-sub">View, filter, and manage all active court cases, NI Act matters, and SARFAESI enforcement files.</div>
+                        <div class="dac-sub">View, filter, and manage all active court cases and Section 138 litigation files.</div>
                     </div>
                     <div class="domain-action-card" onclick="showClientList()">
                         <div class="dac-icon u-is-22"><i class="fas fa-address-book"></i></div>
@@ -5074,10 +3879,7 @@
                             <div class="form-group">
                                 <label>Case Type *</label>
                                 <select id="ccCaseType" class="form-control" aria-label="Case Dispute Category" title="Case Dispute Category" required>
-                                    <option value="section_138">Section 138 (Cheque Bounce)</option>
-                                    <option value="sarfaesi">SARFAESI / DRT Enforcement</option>
-                                    <option value="criminal">Criminal (BNS / IPC)</option>
-                                    <option value="civil">Civil Suit / CPC Commercial</option>
+                                    <option value="section_138" selected>Section 138 (Cheque Bounce)</option>
                                 </select>
                             </div>
                             <div class="form-group">
@@ -5550,7 +4352,7 @@
                 <p>JudiQ AI utilizes a dual-engine architecture comprising a deterministic statutory rule engine (verifying exact dates, statutory limitation periods, notice service presumptions) coupled with an adversarial litigation intelligence model that predicts opponent defence strategies and cross-examination vulnerability points.</p>
 
                 <h4 class="u-is-431">2. Draft Studio & Court Templates</h4>
-                <p>The Draft Studio generates 13+ court-ready document formats including Legal Demand Notices (S.138), Section 142 Criminal Complaints, Section 13(2) & 13(4) SARFAESI Notices, Section 65B BSA Electronic Evidence Certificates, and Anticipatory Bail Applications.</p>
+                <p>The Draft Studio generates court-ready document formats including Section 138 Legal Demand Notices, Section 142 Criminal Complaints, Section 143A Interim Compensation Applications, Section 65B / BSA Electronic Evidence Certificates, and Affidavits.</p>
             </div>
             <div class="u-is-427">
                 <button class="btn btn-primary" onclick="window.closeLegalModal('documentationModal')">Close Manual</button>

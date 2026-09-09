@@ -1446,93 +1446,29 @@ export function applyDomainTheme(domain) {
     const screen = document.getElementById('resultsScreen');
     if (!screen) return;
 
-    const d = (domain || '').toLowerCase();
-    const isComposite = d === 'composite' || d.includes('multi_track');
-    const isSarfaesi = d === 'sarfaesi';
-    const isCriminal = d === 'criminal';
-    const isCivil = d === 'civil';
-    
-    // Swap CSS theme class
-    screen.classList.remove('dashboard--138', 'dashboard--sarfaesi', 'dashboard--criminal', 'dashboard--civil', 'dashboard--composite', 'dashboard--all');
-    if (isComposite) screen.classList.add('dashboard--composite');
-    else if (isSarfaesi) screen.classList.add('dashboard--sarfaesi');
-    else if (isCriminal) screen.classList.add('dashboard--criminal');
-    else if (isCivil) screen.classList.add('dashboard--civil');
-    else if (d === 'all') screen.classList.add('dashboard--all');
-    else screen.classList.add('dashboard--138');
+    // Swap CSS theme class — strictly Section 138
+    screen.classList.remove('dashboard--sarfaesi', 'dashboard--criminal', 'dashboard--civil', 'dashboard--composite', 'dashboard--all');
+    screen.classList.add('dashboard--138');
 
     // Domain badge in results nav
     const badge = document.getElementById('resultsDomainBadge');
     if (badge) {
         badge.style.display = 'inline-flex';
-        if (isComposite) {
-            badge.className = 'domain-badge domain-badge--composite';
-            badge.innerHTML = '<i class="fas fa-bolt"></i> Multi-Track Composite';
-        } else if (isCriminal) {
-            badge.className = 'domain-badge domain-badge--criminal';
-            badge.innerHTML = '<i class="fas fa-user-shield"></i> Criminal Law (BNS / IPC)';
-        } else if (isSarfaesi) {
-            badge.className = 'domain-badge domain-badge--sarfaesi';
-            badge.innerHTML = '<i class="fas fa-university"></i> SARFAESI / DRT';
-        } else if (isCivil) {
-            badge.className = 'domain-badge domain-badge--civil';
-            badge.innerHTML = '<i class="fas fa-balance-scale"></i> Civil & Commercial';
-        } else if (d === 'all') {
-            badge.className = 'domain-badge domain-badge--all';
-            badge.innerHTML = '<i class="fas fa-layer-group"></i> Full Practice (All Domains)';
-        } else {
-            badge.className = 'domain-badge domain-badge--ni';
-            badge.innerHTML = '<i class="fas fa-file-invoice-dollar"></i> NI Act — S.138';
-        }
+        badge.className = 'domain-badge domain-badge--ni';
+        badge.innerHTML = '<i class="fas fa-file-invoice-dollar"></i> NI Act — Section 138';
     }
 
-    // Swap tab groups
-    const niTabs = document.getElementById('niActTabs');
+    // Always show Section 138 tabs, hide others
+    const niTabs = document.getElementById('niActTabs') || document.querySelector('.results-tabs:not(#sarfaesiTabs):not(#criminalTabs)');
     const sarfaesiTabs = document.getElementById('sarfaesiTabs');
     const criminalTabs = document.getElementById('criminalTabs');
 
-    if (niTabs) niTabs.classList.add('hidden');
+    if (niTabs) niTabs.classList.remove('hidden');
     if (sarfaesiTabs) sarfaesiTabs.classList.add('hidden');
     if (criminalTabs) criminalTabs.classList.add('hidden');
 
-    // Hide all tab contents initially
-    const allTabPanels = [
-        'tabOverview', 'tabDetailed', 'tabStrategy',
-        'tabSarfaesi_overview', 'tabSarfaesi_enforcement', 'tabSarfaesi_graph', 'tabSarfaesi_strategy',
-        'tabCriminal_overview', 'tabCriminal_bail', 'tabCriminal_quashing', 'tabCriminal_evidence',
-        'tabDraft'
-    ];
-    allTabPanels.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) { el.classList.add('hidden'); el.classList.remove('active'); }
-    });
-
-    if (isCriminal) {
-        if (criminalTabs) criminalTabs.classList.remove('hidden');
-        const defTab = document.getElementById('tabCriminal_overview');
-        if (defTab) { defTab.classList.remove('hidden'); defTab.classList.add('active'); }
-        // Reset tab buttons active state
-        document.querySelectorAll('#criminalTabs .tab-button').forEach((btn, idx) => {
-            if (idx === 0) btn.classList.add('active');
-            else btn.classList.remove('active');
-        });
-    } else if (isSarfaesi) {
-        if (sarfaesiTabs) sarfaesiTabs.classList.remove('hidden');
-        const defTab = document.getElementById('tabSarfaesi_overview');
-        if (defTab) { defTab.classList.remove('hidden'); defTab.classList.add('active'); }
-        document.querySelectorAll('#sarfaesiTabs .tab-button').forEach((btn, idx) => {
-            if (idx === 0) btn.classList.add('active');
-            else btn.classList.remove('active');
-        });
-    } else {
-        if (niTabs) niTabs.classList.remove('hidden');
-        const defTab = document.getElementById('tabOverview');
-        if (defTab) { defTab.classList.remove('hidden'); defTab.classList.add('active'); }
-        document.querySelectorAll('#niActTabs .tab-button').forEach((btn, idx) => {
-            if (idx === 0) btn.classList.add('active');
-            else btn.classList.remove('active');
-        });
-    }
+    const defTab = document.getElementById('tabOverview');
+    if (defTab) { defTab.classList.remove('hidden'); defTab.classList.add('active'); }
 }
 
 /**
@@ -2035,23 +1971,8 @@ export function renderCompositeResultsPanels(data) {
 export function renderResults(data) {
     if (!data) return;
 
-    // Apply domain theme FIRST — swaps CSS class, tabs, domain badge
-    const caseType = (data.case_data && data.case_data.case_type) || (window.state?.caseData?.case_type) || '';
-    const domain = (data.domain) ? data.domain.toLowerCase() :
-        (caseType.toLowerCase().includes('composite') || caseType.toLowerCase().includes('multi_track') ? 'composite' :
-        (caseType.toLowerCase().includes('criminal') ? 'criminal' :
-        (caseType.toLowerCase().includes('sarfaesi') ? 'sarfaesi' :
-        (caseType.toLowerCase().includes('civil') ? 'civil' :
-        (window.state?.userDomain || 'ni_act')))));
-    applyDomainTheme(domain);
-
-    if (domain === 'composite') {
-        renderCompositeResultsPanels(data);
-    } else if (domain === 'sarfaesi') {
-        renderSarfaesiResultsPanels(data);
-    } else if (domain === 'criminal') {
-        renderCriminalResultsPanels(data);
-    }
+    // Apply Section 138 domain theme
+    applyDomainTheme('ni_act');
 
     const resContainer = document.querySelector('.results-container');
     if (resContainer) resContainer.scrollTop = 0;
@@ -2245,12 +2166,6 @@ export function renderResults(data) {
 
     if (typeof window.renderAdversarialCharts === 'function') {
         window.renderAdversarialCharts(data);
-    }
-
-    if (domain === 'sarfaesi') {
-        renderSarfaesiResultsPanels(data);
-    } else if (domain === 'criminal') {
-        renderCriminalResultsPanels(data);
     }
 }
 
