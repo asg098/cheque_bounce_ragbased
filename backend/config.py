@@ -64,6 +64,12 @@ def get_settings():
         )
     if not s.DATABASE_URL:
         s.DATABASE_URL = "sqlite:///./analytics.db"
+    extra_cors = os.environ.get("CORS_ORIGINS", "")
+    if extra_cors:
+        origins = [o.strip() for o in extra_cors.split(",") if o.strip()]
+        for o in origins:
+            if o not in s.BACKEND_CORS_ORIGINS:
+                s.BACKEND_CORS_ORIGINS.append(o)
     return s
 
 

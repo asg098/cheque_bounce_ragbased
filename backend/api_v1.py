@@ -42,9 +42,13 @@ api_router.include_router(team_manager_router, prefix="/cms", tags=["Team Manage
 api_router.include_router(communication_router, prefix="/cms", tags=["Communication & Audit"])
 
 from knowledge_pipeline import PrecedentIngestionPayload, PrecedentIngestionService
-from fastapi import Body
+from fastapi import Body, Depends
+from security import require_admin
 
 @api_router.post("/ingest/precedents", tags=["Knowledge Pipeline"])
-def ingest_precedent_endpoint(payload: PrecedentIngestionPayload = Body(...)):
+def ingest_precedent_endpoint(
+    payload: PrecedentIngestionPayload = Body(...),
+    admin_user: str = Depends(require_admin)
+):
     return PrecedentIngestionService.ingest_precedent(payload)
 

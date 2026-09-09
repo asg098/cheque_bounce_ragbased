@@ -1,5 +1,8 @@
+import os
+import hmac
 import logging
 import time
+from typing import Dict, Any, cast
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -35,37 +38,27 @@ app = FastAPI(
 )
 
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+@app.exception_handler(RateLimitExceeded)
+async def custom_rate_limit_handler(request: Request, exc: Exception) -> Response:
+    return _rate_limit_exceeded_handler(request, cast(RateLimitExceeded, exc))
 
 
 from metrics import prometheus_metrics_endpoint, JUDIQ_REQUESTS_TOTAL, JUDIQ_REQUEST_DURATION_SECONDS
 
 @app.middleware("http")
-async def add_process_time_and_metrics(request: Request, call_next):
+async def add_security_headers_and_metrics(request: Request, call_next):
     start_time = time.time()
-    origin = request.headers.get("origin")
-    
-    # Handle preflight OPTIONS requests immediately
-    if request.method == "OPTIONS":
-        response = Response(status_code=200)
-        if origin:
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Credentials"] = "true"
-            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD"
-            response.headers["Access-Control-Allow-Headers"] = request.headers.get("access-control-request-headers", "*")
-            response.headers["Access-Control-Max-Age"] = "86400"
-        return response
-
     response = await call_next(request)
     process_time = time.time() - start_time
-    response.headers["X-Process-Time"] = str(process_time)
-    
-    if origin and "Access-Control-Allow-Origin" not in response.headers:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD"
-        response.headers["Access-Control-Allow-Headers"] = "*"
-    
+    response.headers["X-Process-Time"] = f"{process_time:.4f}"
+
+    # Enterprise Production Security Headers
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+
     # Record Prometheus Metrics
     try:
         endpoint = request.url.path
@@ -76,14 +69,16 @@ async def add_process_time_and_metrics(request: Request, call_next):
     except Exception:
         pass
 
-    # Prevent browser from serving stale cached static files in development
+    # Static asset caching policy
     if not request.url.path.startswith("/api/"):
-        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-        response.headers["Pragma"] = "no-cache"
-        response.headers["Expires"] = "0"
+        if settings.DEBUG:
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        else:
+            response.headers["Cache-Control"] = "public, max-age=3600"
     return response
 
-import hmac
 
 # Prometheus scraping endpoint (protected if METRICS_TOKEN is configured in environment)
 async def metrics_endpoint_wrapper(request: Request):
@@ -127,11 +122,29 @@ async def ping():
     return {"status": "ok", "pong": True}
 
 
-@app.api_route("/health", methods=["GET", "HEAD"])
-async def health_check():
-    health_data = {"status": "healthy", "version": settings.VERSION, "timestamp": time.time()}
+@app.api_route("/ready", methods=["GET", "HEAD"], tags=["Observability"])
+async def readiness_probe():
     try:
-        import psutil
+        with DatabaseManager.get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+        return {"status": "ready", "database": "connected"}
+    except Exception as e:
+        logger.error(f"Readiness check failed: {e}")
+        return JSONResponse(status_code=503, content={"status": "not_ready", "error": str(e)})
+
+
+@app.api_route("/live", methods=["GET", "HEAD"], tags=["Observability"])
+async def liveness_probe():
+    return {"status": "alive"}
+
+
+@app.api_route("/health", methods=["GET", "HEAD"], tags=["Observability"])
+async def health_check():
+    health_data: Dict[str, Any] = {"status": "healthy", "version": settings.VERSION, "timestamp": time.time()}
+    try:
+        import psutil  # type: ignore
         health_data["cpu_percent"] = psutil.cpu_percent(interval=0.1)
         health_data["memory"] = psutil.virtual_memory()._asdict()
     except ImportError:
