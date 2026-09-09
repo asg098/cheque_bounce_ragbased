@@ -57,7 +57,42 @@ python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
   - Health: [http://localhost:8000/health](http://localhost:8000/health)
   - Readiness Probe: [http://localhost:8000/ready](http://localhost:8000/ready)
   - Liveness Probe: [http://localhost:8000/live](http://localhost:8000/live)
-  - Prometheus Metrics: [http://localhost:8000/metrics](http://localhost:8000/metrics)
+  - **Prometheus Metrics:** [http://localhost:8000/metrics](http://localhost:8000/metrics)
+
+---
+
+## 🖥️ Windows Standalone Desktop Application (.EXE)
+
+JudiQ AI can be compiled into a self-contained, standalone Windows executable (`JudiQ_AI.exe`) with embedded frontend assets and local SQLite persistence for completely offline or air-gapped litigation operations.
+
+### 1. Build the Executable
+
+```bash
+# Automated compiler script
+python build_exe.py
+
+# Or double-click the Windows batch helper:
+build_exe.bat
+```
+
+The compiled standalone application package is generated in:
+```text
+dist/JudiQ_AI/
+├── JudiQ_AI.exe           # Standalone executable launcher
+├── frontend/              # Embedded production frontend assets
+└── _internal/             # Bundled Python runtime, DLLs & statutory engines
+```
+
+### 2. Launch the Application
+
+Double-click `dist/JudiQ_AI/JudiQ_AI.exe` or execute from command line:
+```bash
+# Default launch (automatically opens default browser at http://127.0.0.1:8000)
+dist\JudiQ_AI\JudiQ_AI.exe
+
+# Custom port without opening browser
+dist\JudiQ_AI\JudiQ_AI.exe --port 8080 --no-browser
+```
 
 ---
 
