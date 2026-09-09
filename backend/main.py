@@ -160,10 +160,17 @@ async def health_check():
     return health_data
 
 
+import sys
 from pathlib import Path
 from fastapi.staticfiles import StaticFiles
 
-frontend_dir = Path(__file__).resolve().parent.parent / "frontend"
+if getattr(sys, "frozen", False):
+    base_dir = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    frontend_dir = base_dir / "frontend"
+    if not frontend_dir.exists():
+        frontend_dir = Path(sys.executable).parent / "frontend"
+else:
+    frontend_dir = Path(__file__).resolve().parent.parent / "frontend"
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
