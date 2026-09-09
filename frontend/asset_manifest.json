@@ -1,27 +1,27 @@
 {
   "styles.css": {
-    "sri_integrity": "sha384-/GIIzc9cR25xf2k5V2/VwqSm/UaiFUPxlPDdurFYoj/nFsrSIImiVpK2FTqAUpW3",
-    "size_kb": 247.89
+    "sri_integrity": "sha384-vsOi6OTjN0Lgm+KreBSXK0Jh98NScRzqGZDa2MR9ClFogMiGkYIb3bcAuCB60HnF",
+    "size_kb": 316.86
   },
   "renderer.js": {
-    "sri_integrity": "sha384-mCW+5ak4wsLR9lSqmxrgJzLSlkf6Gcasbg/fVGyitkAgohyrubxc+7AJgQxjIGHG",
-    "size_kb": 150.3
+    "sri_integrity": "sha384-VR1A+nLvLmsM892I1BgCDJ/Gv8ckZSTnyD3t5DEY1ZzRITH+t+MpqAlt0+ryqJiZ",
+    "size_kb": 146.15
   },
   "wizard.js": {
-    "sri_integrity": "sha384-a3sRdcr7IaNOdxZlJET0CSn7gR0hXoE5N2RwOyvlMk7Ah+kpepAN8ohZ2fDhwCB/",
-    "size_kb": 32.52
+    "sri_integrity": "sha384-zez/DmUcXfrkRplHDWtqEzb5mQw2XUQ/iHiUXcmns0LI3IBQKTNfate6bSjpfa3i",
+    "size_kb": 30.66
   },
   "api.js": {
     "sri_integrity": "sha384-Tef8HeJRqpsarEZ6OqcIM1lZpzx85orUPLWyiLOcYvRxY16NVpQ35/4tepig6fvD",
     "size_kb": 38.63
   },
   "draft_templates.js": {
-    "sri_integrity": "sha384-Q+24s9+Nns+ZxCT07upYldBJvg/GhIIdtI5OfSZn31sOdQc9+rEkef8T2S2eefuI",
-    "size_kb": 80.86
+    "sri_integrity": "sha384-eHIIxnnZFrBQIflzYMISVOZbPPu1OJanwJwtlxVPKzeXFpoLN53rOqUZfG6GNFXR",
+    "size_kb": 63.37
   },
   "js/main.js": {
-    "sri_integrity": "sha384-0b6sXFsPj+Fw5bVoHg811vqPUG3k5LmI/sXOpzmZ5sLXINslotvoGF28gHvMFTZE",
-    "size_kb": 248.44
+    "sri_integrity": "sha384-81r08O+mugChQbJk57/c8PqXZSlfN8kPtqJ3tSyUm0ZF1RFEfw6l0Rbmf/2GDVJX",
+    "size_kb": 246.86
   },
   "js/modules/store.js": {
     "sri_integrity": "sha384-q2enoYfjzs35HSKZkZlyAYrvISAW2qHpGMUyOBeLSlfUVoiR7fLvg5yzgqSKdxRF",
@@ -32,8 +32,8 @@
     "size_kb": 18.58
   },
   "js/modules/simulator.js": {
-    "sri_integrity": "sha384-KmWvGdXuXi/0ZEmnScxuUa1yNxIXfiIFZJKiNl5i70OX5+oswRDaJGvzyZ8AStvP",
-    "size_kb": 7.72
+    "sri_integrity": "sha384-w/y3izjpQavSeXdpDj9FOSYHMA9E7ZQzB7zRqCx+dSkIxcMU7L0X+N57sUpD6qvs",
+    "size_kb": 7.82
   },
   "js/modules/counsel_dock.js": {
     "sri_integrity": "sha384-7iw/xA6XbI41J0NcyjT1V2KWPyPelnPyimf5LGgDeXDmykZcHINgGGVhT3RGtPM2",

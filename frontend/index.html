@@ -134,10 +134,17 @@
                         <i class="fas fa-scale-balanced"></i> High-Court Adversarial Engine
                     </div>
                     <h1>Find the Weakness<br><span class="highlight">Before the Courtroom Does.</span></h1>
-                    <p>Adversarial litigation simulation, automated weakness detection, and institutional-grade courtroom strategy for top-tier law firms and in-house counsel.</p>
+                    <p>Adversarial litigation simulation, automated statutory defect detection, and institutional courtroom strategy for top-tier law firms and in-house counsel.</p>
                     <div class="hero-actions">
-                        <button id="heroGetStartedBtn" class="btn btn-primary btn-large">Start Case Analysis</button>
-                        <button id="heroLoginBtn" class="btn btn-outline btn-large">Sign In to Dashboard</button>
+                        <button id="heroGetStartedBtn" class="btn btn-primary btn-large"><i class="fas fa-rocket"></i> Start Case Analysis</button>
+                        <button id="heroLoginBtn" class="btn btn-outline btn-large"><i class="fas fa-arrow-right-to-bracket"></i> Sign In to Dashboard</button>
+                        <a href="#strategySimulatorSection" class="btn btn-secondary btn-large hero-sim-btn"><i class="fas fa-sliders"></i> Test Live Simulator</a>
+                    </div>
+                    <div class="hero-badges-row">
+                        <span class="hero-mini-badge"><i class="fas fa-check-circle"></i> Section 138 NI Act Engine</span>
+                        <span class="hero-mini-badge"><i class="fas fa-shield-check"></i> 1,307 Benchmark Suites</span>
+                        <span class="hero-mini-badge"><i class="fas fa-brain"></i> Zero Hallucination Guarantee</span>
+                        <span class="hero-mini-badge"><i class="fas fa-lock"></i> AES-256 Vault</span>
                     </div>
                 </div>
                 <div class="hero-image">
@@ -156,8 +163,8 @@
                     <div class="trust-metric-label">Claim Portfolio Audited</div>
                 </div>
                 <div class="trust-metric-item">
-                    <div class="trust-metric-value">600+</div>
-                    <div class="trust-metric-label">Benchmark Legal Test Suites</div>
+                    <div class="trust-metric-value">1,307+</div>
+                    <div class="trust-metric-label">Benchmark Legal Test Suites (100% Pass)</div>
                 </div>
                 <div class="trust-metric-item">
                     <div class="trust-metric-value">0%</div>
@@ -532,13 +539,65 @@
                                 </div>
                             </label>
 
-                            <!-- Module 2: Opposing Counsel Intel -->
+                            <!-- Module 2: SARFAESI -->
+                            <label class="module-choice-card" data-module="sarfaesi">
+                                <input type="checkbox" name="legal_module" value="sarfaesi" onchange="updateModularPricing()">
+                                <div class="module-card-body">
+                                    <div class="module-card-icon"><i class="fas fa-building-columns"></i></div>
+                                    <div class="module-card-info">
+                                        <h4>SARFAESI &amp; DRT Enforcement</h4>
+                                        <p>S.13(2) 60-day demand notice audit, S.13(4) symbolic/physical possession, S.14 CMM applications &amp; DRT Securitization Applications.</p>
+                                    </div>
+                                    <div class="module-quota-pill">10 Cases / mo</div>
+                                </div>
+                            </label>
+
+                            <!-- Module 3: Criminal Quashing -->
+                            <label class="module-choice-card" data-module="criminal">
+                                <input type="checkbox" name="legal_module" value="criminal" onchange="updateModularPricing()">
+                                <div class="module-card-body">
+                                    <div class="module-card-icon"><i class="fas fa-handcuffs"></i></div>
+                                    <div class="module-card-info">
+                                        <h4>Criminal Quashing &amp; Defense (BNSS / CrPC)</h4>
+                                        <p>S.482 / BNSS 528 quashing analysis, Bhajan Lal guidelines compliance, charge discharge petitions &amp; cross-case defense strategies.</p>
+                                    </div>
+                                    <div class="module-quota-pill">10 Cases / mo</div>
+                                </div>
+                            </label>
+
+                            <!-- Module 4: Civil & Specific Relief -->
+                            <label class="module-choice-card" data-module="civil">
+                                <input type="checkbox" name="legal_module" value="civil" onchange="updateModularPricing()">
+                                <div class="module-card-body">
+                                    <div class="module-card-icon"><i class="fas fa-scale-balanced"></i></div>
+                                    <div class="module-card-info">
+                                        <h4>Civil &amp; Specific Relief Strategy</h4>
+                                        <p>Limitation Act Sec 5 delay condonation, Order 39 prima facie injunction tests, specific performance &amp; commercial arbitration claims.</p>
+                                    </div>
+                                    <div class="module-quota-pill">10 Cases / mo</div>
+                                </div>
+                            </label>
+
+                            <!-- Module 5: Bank Recovery & IBC -->
+                            <label class="module-choice-card" data-module="bank_recovery">
+                                <input type="checkbox" name="legal_module" value="bank_recovery" onchange="updateModularPricing()">
+                                <div class="module-card-body">
+                                    <div class="module-card-icon"><i class="fas fa-vault"></i></div>
+                                    <div class="module-card-info">
+                                        <h4>Bank &amp; Commercial Debt Recovery (IBC / Order 37)</h4>
+                                        <p>Order 37 CPC summary suits, IBC Section 7/9 insolvency triggers, balance confirmations &amp; limitation extension tracking.</p>
+                                    </div>
+                                    <div class="module-quota-pill">10 Cases / mo</div>
+                                </div>
+                            </label>
+
+                            <!-- Module 6: Opposing Counsel Intel -->
                             <label class="module-choice-card" data-module="counsel_intel">
                                 <input type="checkbox" name="legal_module" value="counsel_intel" onchange="updateModularPricing()">
                                 <div class="module-card-body">
                                     <div class="module-card-icon"><i class="fas fa-user-secret"></i></div>
                                     <div class="module-card-info">
-                                        <h4>Opposing Counsel Intelligence</h4>
+                                        <h4>Opposing Counsel &amp; Judicial Intel</h4>
                                         <p>Defense strategy patterns, judge-specific win rates, cross-examination counters, and tactical peer submissions.</p>
                                     </div>
                                     <div class="module-quota-pill">10 Cases / mo</div>
@@ -659,7 +718,25 @@
                             <i class="fas fa-chevron-down"></i>
                         </div>
                         <div class="faq-answer">
-                            <p>JudiQ is optimized for common law systems (including India, the United States, United Kingdom, and Canada), with deep knowledge of local civil procedures, limitation acts, and precedent routing algorithms.</p>
+                            <p>JudiQ is optimized for Indian Courts and common law tribunals, with deep statutory rule modeling of the Negotiable Instruments Act (Section 138/141/142/143A/148), Bharatiya Sakshya Adhiniyam 2023 (BSA / S.65B), Limitation Act 1963, SARFAESI Act, and Commercial Courts Act 2015.</p>
+                        </div>
+                    </div>
+                    <div class="faq-item">
+                        <div class="faq-question" onclick="toggleFaqItem(this)">
+                            <span>How does JudiQ calculate Section 138 statutory limitation deadlines?</span>
+                            <i class="fas fa-chevron-down"></i>
+                        </div>
+                        <div class="faq-answer">
+                            <p>JudiQ employs a dual deterministic engine with zero LLM hallucination for timeline calculation. It strictly audits the 30-day notice dispatch window from the Bank Dishonour Memo date, enforces the 15-day debtor cure period, and computes the exact 30-day Section 142 complaint filing window while accounting for Section 10 General Clauses Act court holiday exemptions.</p>
+                        </div>
+                    </div>
+                    <div class="faq-item">
+                        <div class="faq-question" onclick="toggleFaqItem(this)">
+                            <span>Are the Supreme Court precedent citations verified and authoritative?</span>
+                            <i class="fas fa-chevron-down"></i>
+                        </div>
+                        <div class="faq-answer">
+                            <p>Yes. Every judicial ratio decidendi cited in adversarial simulations and the Litigation Readiness Suite is anchored to landmark Supreme Court of India rulings (such as Kusum Ingots, Meters and Instruments, Bir Singh, and Dashrath Rupsingh Rathod). The platform provides direct 1-click links to official law reports and Indian Kanoon authorities.</p>
                         </div>
                     </div>
                 </div>

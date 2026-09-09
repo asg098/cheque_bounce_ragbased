@@ -69,7 +69,7 @@ async def add_security_headers_and_metrics(request: Request, call_next):
     except Exception:
         pass
 
-    # Static asset caching policy
+    # Static asset caching policy & Content-Length streaming safety
     if not request.url.path.startswith("/api/"):
         if settings.DEBUG:
             response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
@@ -77,6 +77,9 @@ async def add_security_headers_and_metrics(request: Request, call_next):
             response.headers["Expires"] = "0"
         else:
             response.headers["Cache-Control"] = "public, max-age=3600"
+        # Prevent uvicorn 'Response content longer than Content-Length' on BaseHTTPMiddleware streaming
+        if "content-length" in response.headers:
+            del response.headers["content-length"]
     return response
 
 
